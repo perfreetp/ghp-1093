@@ -1,0 +1,634 @@
+import { useState, useMemo } from "react";
+import { useAppStore } from "@/store";
+import {
+  inspectionStatusMap,
+  inspectionTypeMap,
+  formatDate,
+  cn,
+} from "@/utils";
+import {
+  Plus,
+  Search,
+  ChevronDown,
+  ChevronRight,
+  Play,
+  Eye,
+  Edit2,
+  X,
+  Calendar,
+  Users,
+  Building2,
+  MapPin,
+  QrCode,
+  CheckCircle2,
+  User,
+} from "lucide-react";
+import type { Inspection, InspectionPoint } from "@/types";
+
+const STATUS_TABS = [
+  { key: "all", label: "全部" },
+  { key: "pending", label: "待执行" },
+  { key: "in_progress", label: "进行中" },
+  { key: "completed", label: "已完成" },
+  { key: "overdue", label: "已逾期" },
+];
+
+export default function InspectionList() {
+  const {
+    inspections,
+    inspectionPoints,
+    users,
+    buildings,
+    addInspection,
+    currentUser,
+  } = useAppStore();
+
+  const [activeTab, setActiveTab] = useState("all");
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [dateRange, setDateRange] = useState({ start: "", end: "" });
+  const [inspectorFilter, setInspectorFilter] = useState("");
+
+  const [newTask, setNewTask] = useState({
+    title: "",
+    type: "daily" as Inspection["type"],
+    buildingIds: [] as string[],
+    pointIds: [] as string[],
+    inspectorId: "",
+    startDate: "",
+    endDate: "",
+  });
+
+  const inspectors = users.filter((u) => u.role === "inspector");
+
+  const filteredInspections = useMemo(() => {
+    return inspections.filter((item) => {
+      if (activeTab !== "all" && item.status !== activeTab) return false;
+      if (dateRange.start && item.startDate < dateRange.start) return false;
+      if (dateRange.end && item.endDate > dateRange.end) return false;
+      if (inspectorFilter && item.inspectorId !== inspectorFilter) return false;
+      return true;
+    });
+  }, [inspections, activeTab, dateRange, inspectorFilter]);
+
+  const toggleExpand = (id: string) => {
+    const next = new Set(expandedRows);
+    if (next.has(id)) {
+      next.delete(id);
+    } else {
+      next.add(id);
+    }
+    setExpandedRows(next);
+  };
+
+  const getPointsForInspection = (inspection: Inspection): InspectionPoint[] => {
+    if (inspection.pointIds.length > 0) {
+      return inspection.pointIds
+        .map((pid) => inspectionPoints.find((p) => p.id === pid))
+        .filter(Boolean) as InspectionPoint[];
+    }
+    const buildingPoints = inspection.buildingIds
+      .map((bid) => inspectionPoints.filter((p) => p.buildingId === bid))
+      .flat();
+    return buildingPoints.slice(0, 8);
+  };
+
+  const getProgressColor = (progress: number, status: Inspection["status"]) => {
+    if (status === "overdue") return "bg-fire-500";
+    if (status === "completed") return "bg-emerald-500";
+    if (progress >= 60) return "bg-emerald-500";
+    if (progress >= 30) return "bg-industrial-500";
+    return "bg-amber-500";
+  };
+
+  const handleBuildingSelect = (buildingId: string) => {
+    setNewTask((prev) => {
+      const buildingIds = prev.buildingIds.includes(buildingId)
+        ? prev.buildingIds.filter((id) => id !== buildingId)
+        : [...prev.buildingIds, buildingId];
+      return { ...prev, buildingIds };
+    });
+  };
+
+  const handlePointSelect = (pointId: string) => {
+    setNewTask((prev) => {
+      const pointIds = prev.pointIds.includes(pointId)
+        ? prev.pointIds.filter((id) => id !== pointId)
+        : [...prev.pointIds, pointId];
+      return { ...prev, pointIds };
+    });
+  };
+
+  const availablePoints = useMemo(() => {
+    if (newTask.buildingIds.length === 0) return inspectionPoints;
+    return inspectionPoints.filter((p) =>
+      newTask.buildingIds.includes(p.buildingId)
+    );
+  }, [newTask.buildingIds, inspectionPoints]);
+
+  const handleCreateTask = () => {
+    if (
+      !newTask.title ||
+      !newTask.inspectorId ||
+      !newTask.startDate ||
+      !newTask.endDate
+    ) {
+      return;
+    }
+    const inspector = users.find((u) => u.id === newTask.inspectorId);
+    const task: Inspection = {
+      id: `i${Date.now()}`,
+      title: newTask.title,
+      type: newTask.type,
+      status: "pending",
+      inspectorId: newTask.inspectorId,
+      inspectorName: inspector?.name || "",
+      buildingIds: newTask.buildingIds,
+      pointIds: newTask.pointIds,
+      startDate: newTask.startDate,
+      endDate: newTask.endDate,
+      progress: 0,
+      createdAt: formatDate(new Date()),
+      creatorName: currentUser.name,
+    };
+    addInspection(task);
+    setShowCreateModal(false);
+    setNewTask({
+      title: "",
+      type: "daily",
+      buildingIds: [],
+      pointIds: [],
+      inspectorId: "",
+      startDate: "",
+      endDate: "",
+    });
+  };
+
+  return (
+    <div className="p-6 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-800">巡检任务管理</h1>
+          <p className="text-sm text-slate-500 mt-1">
+            管理消防巡检任务的创建、分配和执行进度
+          </p>
+        </div>
+        <button
+          className="btn-primary"
+          onClick={() => setShowCreateModal(true)}
+        >
+          <Plus className="w-4 h-4" />
+          新建任务
+        </button>
+      </div>
+
+      <div className="card p-4 space-y-4">
+        <div className="flex flex-wrap gap-2">
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              className={cn(
+                "px-4 py-2 rounded-md text-sm font-medium transition-all",
+                activeTab === tab.key
+                  ? "bg-industrial-600 text-white shadow-sm"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              )}
+              onClick={() => setActiveTab(tab.key)}
+            >
+              {tab.label}
+              <span
+                className={cn(
+                  "ml-1.5 px-1.5 py-0.5 rounded text-xs",
+                  activeTab === tab.key
+                    ? "bg-white/20"
+                    : "bg-white text-slate-500"
+                )}
+              >
+                {tab.key === "all"
+                  ? inspections.length
+                  : inspections.filter((i) => i.status === tab.key).length}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap gap-3 items-center">
+          <div className="flex items-center gap-2">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <input
+              type="date"
+              className="input w-40"
+              value={dateRange.start}
+              onChange={(e) =>
+                setDateRange((p) => ({ ...p, start: e.target.value }))
+              }
+            />
+            <span className="text-slate-400">至</span>
+            <input
+              type="date"
+              className="input w-40"
+              value={dateRange.end}
+              onChange={(e) =>
+                setDateRange((p) => ({ ...p, end: e.target.value }))
+              }
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Users className="w-4 h-4 text-slate-400" />
+            <select
+              className="input w-40"
+              value={inspectorFilter}
+              onChange={(e) => setInspectorFilter(e.target.value)}
+            >
+              <option value="">全部巡检员</option>
+              {inspectors.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            className="btn-outline ml-auto"
+            onClick={() => {
+              setDateRange({ start: "", end: "" });
+              setInspectorFilter("");
+            }}
+          >
+            重置筛选
+          </button>
+        </div>
+      </div>
+
+      <div className="card overflow-hidden">
+        <table className="w-full">
+          <thead>
+            <tr>
+              <th className="table-th w-10"></th>
+              <th className="table-th">任务信息</th>
+              <th className="table-th w-48">巡检员</th>
+              <th className="table-th w-52">执行周期</th>
+              <th className="table-th w-28">状态</th>
+              <th className="table-th w-32">创建人</th>
+              <th className="table-th w-56">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredInspections.map((inspection) => (
+              <>
+                <tr
+                  key={inspection.id}
+                  className={cn(
+                    "table-row cursor-pointer",
+                    expandedRows.has(inspection.id) && "bg-slate-50"
+                  )}
+                >
+                  <td className="table-td">
+                    <button
+                      className="p-1 hover:bg-slate-200 rounded transition-colors"
+                      onClick={() => toggleExpand(inspection.id)}
+                    >
+                      {expandedRows.has(inspection.id) ? (
+                        <ChevronDown className="w-4 h-4 text-slate-500" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-slate-500" />
+                      )}
+                    </button>
+                  </td>
+                  <td className="table-td">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-slate-800">
+                          {inspection.title}
+                        </span>
+                        <span className="badge-blue">
+                          {inspectionTypeMap[inspection.type]}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between text-xs text-slate-500">
+                          <span>完成进度</span>
+                          <span className="font-medium">{inspection.progress}%</span>
+                        </div>
+                        <div className="progress-bar">
+                          <div
+                            className={cn(
+                              "progress-fill",
+                              getProgressColor(inspection.progress, inspection.status)
+                            )}
+                            style={{ width: `${inspection.progress}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="table-td">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-full bg-industrial-100 flex items-center justify-center text-industrial-700 text-xs font-semibold">
+                        {inspection.inspectorName.slice(0, 2)}
+                      </div>
+                      <span className="text-sm">{inspection.inspectorName}</span>
+                    </div>
+                  </td>
+                  <td className="table-td">
+                    <div className="text-sm space-y-0.5">
+                      <div className="text-slate-600">
+                        起：{inspection.startDate}
+                      </div>
+                      <div className="text-slate-600">
+                        止：{inspection.endDate}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="table-td">
+                    <span className={inspectionStatusMap[inspection.status].className}>
+                      {inspectionStatusMap[inspection.status].label}
+                    </span>
+                  </td>
+                  <td className="table-td text-sm text-slate-600">
+                    <div className="flex items-center gap-1.5">
+                      <User className="w-3.5 h-3.5 text-slate-400" />
+                      {inspection.creatorName}
+                    </div>
+                  </td>
+                  <td className="table-td">
+                    <div className="flex items-center gap-1">
+                      {inspection.status === "pending" && (
+                        <button className="btn-ghost text-industrial-600 hover:text-industrial-700 hover:bg-industrial-50 !px-2 !py-1">
+                          <Play className="w-4 h-4" />
+                          <span className="text-xs">开始</span>
+                        </button>
+                      )}
+                      <button className="btn-ghost text-slate-600 hover:bg-slate-100 !px-2 !py-1">
+                        <Eye className="w-4 h-4" />
+                        <span className="text-xs">详情</span>
+                      </button>
+                      <button className="btn-ghost text-slate-600 hover:bg-slate-100 !px-2 !py-1">
+                        <Edit2 className="w-4 h-4" />
+                        <span className="text-xs">编辑</span>
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {expandedRows.has(inspection.id) && (
+                  <tr key={`${inspection.id}-expanded`}>
+                    <td colSpan={7} className="bg-slate-50/50 border-b border-slate-100">
+                      <div className="px-12 py-4">
+                        <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-2">
+                          <MapPin className="w-4 h-4 text-industrial-500" />
+                          巡检点位（共 {getPointsForInspection(inspection).length} 个）
+                        </div>
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                          {getPointsForInspection(inspection).map((point, idx) => {
+                            const completed = inspection.progress > 0 && idx < Math.ceil((inspection.progress / 100) * getPointsForInspection(inspection).length);
+                            return (
+                              <div
+                                key={point.id}
+                                className={cn(
+                                  "p-3 rounded-lg border transition-all",
+                                  completed
+                                    ? "bg-emerald-50 border-emerald-200"
+                                    : "bg-white border-slate-200 hover:border-industrial-200"
+                                )}
+                              >
+                                <div className="flex items-start justify-between mb-2">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className={cn(
+                                        "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold",
+                                        completed
+                                          ? "bg-emerald-500 text-white"
+                                          : "bg-slate-100 text-slate-600"
+                                      )}
+                                    >
+                                      {completed ? (
+                                        <CheckCircle2 className="w-4 h-4" />
+                                      ) : (
+                                        idx + 1
+                                      )}
+                                    </span>
+                                    <span className="font-medium text-sm text-slate-800 line-clamp-1">
+                                      {point.location}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="space-y-1 text-xs text-slate-500 pl-8">
+                                  <div className="flex items-center gap-1">
+                                    <Building2 className="w-3 h-3" />
+                                    {point.buildingName}
+                                  </div>
+                                  <div className="flex items-center gap-1 font-mono">
+                                    <QrCode className="w-3 h-3" />
+                                    {point.qrCode}
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+        {filteredInspections.length === 0 && (
+          <div className="py-16 text-center text-slate-400">
+            <Search className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>暂无匹配的巡检任务</p>
+          </div>
+        )}
+      </div>
+
+      {showCreateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-lg font-semibold text-slate-800">新建巡检任务</h2>
+              <button
+                className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
+                onClick={() => setShowCreateModal(false)}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="label">任务标题</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="请输入任务标题"
+                    value={newTask.title}
+                    onChange={(e) =>
+                      setNewTask((p) => ({ ...p, title: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="label">任务类型</label>
+                  <select
+                    className="input"
+                    value={newTask.type}
+                    onChange={(e) =>
+                      setNewTask((p) => ({ ...p, type: e.target.value as Inspection["type"] }))
+                    }
+                  >
+                    {Object.entries(inspectionTypeMap).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">巡检员</label>
+                  <select
+                    className="input"
+                    value={newTask.inspectorId}
+                    onChange={(e) =>
+                      setNewTask((p) => ({ ...p, inspectorId: e.target.value }))
+                    }
+                  >
+                    <option value="">请选择巡检员</option>
+                    {inspectors.map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} - {u.dept}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="label">开始日期</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={newTask.startDate}
+                    onChange={(e) =>
+                      setNewTask((p) => ({ ...p, startDate: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="label">结束日期</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={newTask.endDate}
+                    onChange={(e) =>
+                      setNewTask((p) => ({ ...p, endDate: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="label">
+                  选择楼栋
+                  <span className="text-xs font-normal text-slate-400 ml-2">
+                    已选 {newTask.buildingIds.length} 栋
+                  </span>
+                </label>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2 max-h-32 overflow-y-auto p-2 border border-slate-200 rounded-md">
+                  {buildings.map((b) => (
+                    <label
+                      key={b.id}
+                      className={cn(
+                        "flex items-center gap-2 p-2 rounded-md cursor-pointer transition-all text-sm",
+                        newTask.buildingIds.includes(b.id)
+                          ? "bg-industrial-50 border border-industrial-200 text-industrial-700"
+                          : "hover:bg-slate-50 border border-transparent"
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded text-industrial-600 focus:ring-industrial-500"
+                        checked={newTask.buildingIds.includes(b.id)}
+                        onChange={() => handleBuildingSelect(b.id)}
+                      />
+                      <span className="truncate">{b.name}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="label">
+                  选择巡检点位
+                  <span className="text-xs font-normal text-slate-400 ml-2">
+                    已选 {newTask.pointIds.length} 个
+                  </span>
+                </label>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 border border-slate-200 rounded-md">
+                  {availablePoints.map((p) => (
+                    <label
+                      key={p.id}
+                      className={cn(
+                        "flex items-center gap-2 p-2 rounded-md cursor-pointer transition-all text-sm",
+                        newTask.pointIds.includes(p.id)
+                          ? "bg-industrial-50 border border-industrial-200 text-industrial-700"
+                          : "hover:bg-slate-50 border border-transparent"
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        className="rounded text-industrial-600 focus:ring-industrial-500"
+                        checked={newTask.pointIds.includes(p.id)}
+                        onChange={() => handlePointSelect(p.id)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate font-medium">{p.location}</div>
+                        <div className="text-xs text-slate-400 truncate">
+                          {p.buildingName} · {p.qrCode}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <label className="label">创建人</label>
+                <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+                  <div className="w-7 h-7 rounded-full bg-industrial-100 flex items-center justify-center text-industrial-700 text-xs font-semibold">
+                    {currentUser.name.slice(0, 2)}
+                  </div>
+                  <span className="text-sm text-slate-700">{currentUser.name}</span>
+                  <span className="text-xs text-slate-400">({currentUser.dept})</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button
+                className="btn-outline"
+                onClick={() => setShowCreateModal(false)}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleCreateTask}
+                disabled={
+                  !newTask.title ||
+                  !newTask.inspectorId ||
+                  !newTask.startDate ||
+                  !newTask.endDate
+                }
+              >
+                <Plus className="w-4 h-4" />
+                创建任务
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
