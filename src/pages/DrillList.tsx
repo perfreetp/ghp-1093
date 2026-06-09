@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useAppStore } from "@/store";
 import { drillTypeMap, drillStatusMap, formatDateTime } from "@/utils";
 import {
@@ -22,8 +22,11 @@ import {
   PersonStanding,
   Timer,
   UserCircle2,
+  CheckCircle,
+  Upload,
+  Check,
 } from "lucide-react";
-import type { Drill, DrillStatus, DrillType } from "@/types";
+import type { Drill, DrillStatus, DrillType, DrillScores } from "@/types";
 
 const drillTypeGradient: Record<DrillType, string> = {
   fire: "from-fire-500 to-fire-700",
@@ -64,13 +67,36 @@ const detailTabs = [
 ];
 
 export default function DrillList() {
-  const { drills, drillAttendees } = useAppStore();
+  const {
+    drills,
+    drillAttendees,
+    updateDrillScores,
+    updateDrillComment,
+    addDrillPhoto,
+    deleteDrillPhoto,
+    completeDrill,
+  } = useAppStore();
   const [statusTab, setStatusTab] = useState<"all" | DrillStatus>("all");
   const [typeFilter, setTypeFilter] = useState<"all" | DrillType>("all");
   const [searchText, setSearchText] = useState("");
   const [selectedDrill, setSelectedDrill] = useState<Drill | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailTab, setDetailTab] = useState("plan");
+  const [showToast, setShowToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
+
+  const [localScores, setLocalScores] = useState<DrillScores>({
+    organization: 0,
+    participation: 0,
+    effect: 0,
+    organizationRemark: "",
+    participationRemark: "",
+    effectRemark: "",
+  });
+  const [localComment, setLocalComment] = useState("");
+  const [localPhotoUrls, setLocalPhotoUrls] = useState<string[]>([]);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredDrills = useMemo(() => {
     return drills.filter((d) => {
@@ -85,11 +111,105 @@ export default function DrillList() {
     setSelectedDrill(drill);
     setDrawerOpen(true);
     setDetailTab("plan");
+    setLocalScores({
+      organization: drill.scores?.organization || 0,
+      participation: drill.scores?.participation || 0,
+      effect: drill.scores?.effect || 0,
+      organizationRemark: drill.scores?.organizationRemark || "",
+      participationRemark: drill.scores?.participationRemark || "",
+      effectRemark: drill.scores?.effectRemark || "",
+    });
+    setLocalComment(drill.comment || "");
+    setLocalPhotoUrls([...(drill.photoUrls || [])]);
   };
 
   const closeDrawer = () => {
     setDrawerOpen(false);
     setTimeout(() => setSelectedDrill(null), 200);
+  };
+
+  const showSuccessToast = (message: string) => {
+    setToastMessage(message);
+    setShowToast(true);
+    setTimeout(() => setShowToast(false), 3000);
+  };
+
+  const handleScoreClick = (dimension: "organization" | "participation" | "effect", value: number) => {
+    if (!selectedDrill) return;
+    setLocalScores((prev) => ({
+      ...prev,
+      [dimension]: prev[dimension] === value ? 0 : value,
+    }));
+  };
+
+  const handleScoreRemarkChange = (
+    dimension: "organizationRemark" | "participationRemark" | "effectRemark",
+    value: string
+  ) => {
+    setLocalScores((prev) => ({
+      ...prev,
+      [dimension]: value,
+    }));
+  };
+
+  const handleAddPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      const newPhotoUrls = [...localPhotoUrls, result || `photo-${Date.now()}`].slice(0, 9);
+      setLocalPhotoUrls(newPhotoUrls);
+    };
+    reader.readAsDataURL(file);
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDeletePhoto = (index: number) => {
+    setLocalPhotoUrls((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSaveAll = () => {
+    if (!selectedDrill) return;
+    updateDrillScores(selectedDrill.id, localScores);
+    updateDrillComment(selectedDrill.id, localComment);
+
+    const currentUrls = selectedDrill.photoUrls || [];
+    const added = localPhotoUrls.slice(currentUrls.length);
+    added.forEach((url) => addDrillPhoto(selectedDrill.id, url));
+
+    currentUrls.forEach((url, idx) => {
+      if (!localPhotoUrls.includes(url)) {
+        const storeIndex = selectedDrill.photoUrls?.indexOf(url) ?? idx;
+        deleteDrillPhoto(selectedDrill.id, storeIndex);
+      }
+    });
+
+    showSuccessToast("保存成功");
+  };
+
+  const handleCompleteDrill = () => {
+    if (!selectedDrill) return;
+    completeDrill(selectedDrill.id);
+    showSuccessToast("演练已标记为完成");
+    setSelectedDrill((prev) =>
+      prev
+        ? {
+            ...prev,
+            status: "completed",
+            endTime: new Date().toISOString().slice(0, 16).replace("T", " "),
+          }
+        : null
+    );
+  };
+
+  const handleGoToPhotoTab = () => {
+    setDetailTab("photo");
   };
 
   const drillAttendeeList = useMemo(() => {
@@ -363,6 +483,32 @@ export default function DrillList() {
             <div className="flex-1 overflow-y-auto p-6">
               {detailTab === "plan" && (
                 <div className="space-y-5 animate-fade-in">
+                  <div className="flex items-center gap-3">
+                    {selectedDrill.status === "completed" ? (
+                      <button
+                        onClick={handleGoToPhotoTab}
+                        className="btn-primary !py-2 text-sm"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        补充演练总结
+                      </button>
+                    ) : selectedDrill.status === "planned" || selectedDrill.status === "ongoing" ? (
+                      <button
+                        onClick={handleCompleteDrill}
+                        className="btn-primary !py-2 text-sm"
+                      >
+                        <CheckCircle className="w-4 h-4" />
+                        标记演练完成
+                      </button>
+                    ) : null}
+                    {selectedDrill.endTime && (
+                      <div className="flex items-center gap-1.5 text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200">
+                        <Clock className="w-4 h-4 text-slate-500" />
+                        结束时间：{selectedDrill.endTime}
+                      </div>
+                    )}
+                  </div>
+
                   <div>
                     <h4 className="section-title mb-3">
                       <FileText className="w-5 h-5 text-industrial-600" />
@@ -481,73 +627,164 @@ export default function DrillList() {
                 </div>
               )}
 
-              {detailTab === "photo" && (
-                <div className="space-y-5 animate-fade-in">
+              {detailTab === "photo" && selectedDrill && (
+                <div className="space-y-5 animate-fade-in pb-28">
                   <div>
                     <h4 className="section-title mb-3">
-                      <ImageIcon className="w-5 h-5 text-industrial-600" />
-                      现场照片
+                      <Star className="w-5 h-5 text-warning-500" />
+                      评分区
+                    </h4>
+                    <div className="card p-5 space-y-5">
+                      {[
+                        { key: "organization", label: "组织评分", remarkKey: "organizationRemark" as const },
+                        { key: "participation", label: "参与评分", remarkKey: "participationRemark" as const },
+                        { key: "effect", label: "效果评分", remarkKey: "effectRemark" as const },
+                      ].map((item) => (
+                        <div key={item.key}>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-sm font-medium text-slate-700">{item.label}</span>
+                            <div className="flex items-center gap-1">
+                              {[1, 2, 3, 4, 5].map((n) => {
+                                const scoreValue = localScores[item.key as keyof DrillScores] as number;
+                                return (
+                                  <button
+                                    key={n}
+                                    type="button"
+                                    onClick={() =>
+                                      handleScoreClick(
+                                        item.key as "organization" | "participation" | "effect",
+                                        n
+                                      )
+                                    }
+                                    className="p-0.5 transition-transform hover:scale-110"
+                                  >
+                                    <Star
+                                      className={`w-6 h-6 transition-colors ${
+                                        n <= scoreValue
+                                          ? "text-warning-500 fill-warning-500"
+                                          : "text-slate-300 hover:text-warning-300"
+                                      }`}
+                                    />
+                                  </button>
+                                );
+                              })}
+                              <span className="ml-2 text-sm font-medium text-slate-600 w-8 text-right">
+                                {(localScores[item.key as keyof DrillScores] as number) || 0}.0
+                              </span>
+                            </div>
+                          </div>
+                          <textarea
+                            value={localScores[item.remarkKey] || ""}
+                            onChange={(e) => handleScoreRemarkChange(item.remarkKey, e.target.value)}
+                            placeholder={`请输入${item.label.slice(0, 2)}说明...`}
+                            className="input min-h-[72px] resize-y text-sm"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="section-title mb-3">
+                      <FileText className="w-5 h-5 text-industrial-600" />
+                      综合评价
                     </h4>
                     <div className="card p-5">
-                      <div className="grid grid-cols-3 gap-3">
-                        {Array.from({ length: 9 }).map((_, i) => {
-                          const hasPhoto = i < (selectedDrill.photos?.length || 0) || selectedDrill.status === "completed";
-                          return (
-                            <div
-                              key={i}
-                              className={`aspect-square rounded-lg border-2 border-dashed flex items-center justify-center transition-all ${
-                                hasPhoto
-                                  ? `bg-gradient-to-br ${drillTypeGradient[selectedDrill.type]} border-transparent cursor-pointer hover:opacity-90`
-                                  : "border-slate-200 bg-slate-50 text-slate-400"
-                              }`}
-                            >
-                              {hasPhoto ? (
-                                <div className="text-white/90 flex flex-col items-center">
-                                  <ImageIcon className="w-8 h-8 mb-1 opacity-80" />
-                                  <span className="text-xs font-medium opacity-90">照片 {i + 1}</span>
-                                </div>
-                              ) : (
-                                <Plus className="w-6 h-6" />
-                              )}
-                            </div>
-                          );
-                        })}
+                      <textarea
+                        value={localComment}
+                        onChange={(e) => setLocalComment(e.target.value)}
+                        onBlur={() => selectedDrill && updateDrillComment(selectedDrill.id, localComment)}
+                        placeholder="请输入本次演练综合评价..."
+                        className="input min-h-[140px] resize-y text-sm"
+                      />
+                      <div className="flex items-center justify-between mt-2 text-xs text-slate-400">
+                        <span>失焦自动保存</span>
+                        <span>{localComment.length} 字</span>
                       </div>
                     </div>
                   </div>
 
                   <div>
                     <h4 className="section-title mb-3">
-                      <Star className="w-5 h-5 text-warning-500" />
-                      演练评价
+                      <ImageIcon className="w-5 h-5 text-industrial-600" />
+                      现场照片
+                      <span className="ml-2 text-xs font-normal text-slate-400">
+                        （{localPhotoUrls.length}/9）
+                      </span>
                     </h4>
                     <div className="card p-5">
-                      {selectedDrill.evaluation ? (
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-1">
-                            {[1, 2, 3, 4, 5].map((n) => (
-                              <Star
-                                key={n}
-                                className={`w-5 h-5 ${n <= 4 ? "text-warning-500 fill-warning-500" : "text-slate-300"}`}
-                              />
-                            ))}
-                            <span className="ml-2 text-sm font-medium text-slate-700">4.0 分</span>
+                      <div className="grid grid-cols-3 gap-3">
+                        {localPhotoUrls.map((photo, index) => (
+                          <div
+                            key={index}
+                            className={`relative aspect-square rounded-lg overflow-hidden border-2 bg-gradient-to-br ${drillTypeGradient[selectedDrill.type]}`}
+                          >
+                            <img
+                              src={photo}
+                              alt={`现场照片 ${index + 1}`}
+                              className="w-full h-full object-cover"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = "none";
+                              }}
+                            />
+                            <div className="absolute inset-0 flex flex-col items-center justify-center text-white/90 pointer-events-none bg-black/0">
+                              <ImageIcon className="w-6 h-6 mb-0.5 opacity-80" />
+                              <span className="text-[10px] font-medium opacity-90">照片 {index + 1}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleDeletePhoto(index)}
+                              className="absolute top-1 right-1 w-6 h-6 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-red-500 transition-colors"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           </div>
-                          <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-                            {selectedDrill.evaluation}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="text-center py-8 text-slate-400">
-                          <Star className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                          <p className="text-sm">演练尚未完成，暂无评价</p>
-                        </div>
-                      )}
+                        ))}
+
+                        {localPhotoUrls.length < 9 && (
+                          <button
+                            type="button"
+                            onClick={() => fileInputRef.current?.click()}
+                            className="aspect-square rounded-lg border-2 border-dashed border-slate-300 bg-slate-50 flex flex-col items-center justify-center text-slate-400 hover:border-industrial-400 hover:text-industrial-500 hover:bg-industrial-50 transition-all"
+                          >
+                            <Plus className="w-7 h-7 mb-1" />
+                            <Upload className="w-4 h-4 mb-0.5" />
+                            <span className="text-xs font-medium">上传照片</span>
+                          </button>
+                        )}
+                      </div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleAddPhoto}
+                        className="hidden"
+                      />
                     </div>
+                  </div>
+
+                  <div className="fixed bottom-0 left-0 right-0 max-w-3xl ml-auto p-4 bg-white border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] z-10">
+                    <button
+                      type="button"
+                      onClick={handleSaveAll}
+                      className="w-full btn-primary !py-3 text-base font-semibold"
+                    >
+                      <Check className="w-5 h-5" />
+                      保存评语和照片
+                    </button>
                   </div>
                 </div>
               )}
             </div>
+
+            {showToast && (
+              <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-fade-in">
+                <div className="bg-green-600 text-white px-6 py-3 rounded-lg shadow-xl flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5" />
+                  <span className="font-medium">{toastMessage}</span>
+                </div>
+              </div>
+            )}
           </div>
         </>
       )}

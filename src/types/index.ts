@@ -1,12 +1,16 @@
 export type RiskLevel = "high" | "medium" | "low" | "normal";
 
-export type DeviceType = "fire_extinguisher" | "sprinkler" | "fire_hydrant" | "smoke_detector" | "fire_alarm";
+export type BuildingType = "office" | "rnd" | "workshop" | "warehouse" | "complex" | "other";
+
+export type DeviceType = "fire_extinguisher" | "sprinkler" | "fire_hydrant" | "smoke_detector" | "fire_alarm" | "emergency_light";
 
 export type DeviceStatus = "normal" | "warning" | "expired" | "maintenance";
 
-export type CheckCycle = "monthly" | "quarterly" | "half_year" | "yearly";
+export type CheckCycle = "daily" | "weekly" | "monthly" | "quarterly" | "half_year" | "yearly";
 
 export type InspectionStatus = "pending" | "in_progress" | "completed" | "overdue";
+
+export type InspectionPointStatus = "pending" | "done";
 
 export type InspectionType = "daily" | "weekly" | "monthly" | "special";
 
@@ -18,24 +22,39 @@ export type DrillType = "fire" | "evacuation" | "comprehensive";
 
 export type DrillStatus = "planned" | "ongoing" | "completed";
 
-export type UserRole = "director" | "manager" | "inspector" | "rectifier";
+export interface DrillScores {
+  organization: number;
+  participation: number;
+  effect: number;
+  organizationRemark?: string;
+  participationRemark?: string;
+  effectRemark?: string;
+}
+
+export type UserRole = "director" | "manager" | "inspector" | "rectifier" | "engineer";
 
 export interface Building {
   id: string;
+  code: string;
   name: string;
   address: string;
   floors: number;
   area: number;
+  buildingType: BuildingType;
   riskLevel: RiskLevel;
   buildYear: number;
+  fireFacilitiesDesc: string;
   fireFacilities: string[];
   lastInspection: string;
+  remark: string;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface Device {
   id: string;
+  code: string;
+  name: string;
   buildingId: string;
   buildingName: string;
   location: string;
@@ -43,13 +62,13 @@ export interface Device {
   model: string;
   serialNumber: string;
   installDate: string;
+  expireDate: string;
   lastCheckDate: string;
   nextCheckDate: string;
   checkCycle: CheckCycle;
   status: DeviceStatus;
   pressureLevel?: "normal" | "low" | "high";
-  expireDate?: string;
-  remark?: string;
+  remark: string;
 }
 
 export interface InspectionPoint {
@@ -61,6 +80,11 @@ export interface InspectionPoint {
   items: string[];
   lastInspectDate?: string;
   inspected?: boolean;
+  status?: InspectionPointStatus;
+  checkedItems?: string[];
+  photoUrls?: string[];
+  notes?: string;
+  savedAt?: string;
 }
 
 export interface Inspection {
@@ -92,6 +116,14 @@ export interface InspectionRecord {
   hasHazard: boolean;
 }
 
+export interface StatusHistoryItem {
+  time: string;
+  fromStatus: HazardStatus | "";
+  toStatus: HazardStatus;
+  operator: string;
+  description: string;
+}
+
 export interface Hazard {
   id: string;
   title: string;
@@ -117,7 +149,9 @@ export interface Hazard {
   reviewDate?: string;
   reviewResult?: "pass" | "fail";
   reviewRemark?: string;
+  reviewNotes?: string;
   history: { status: string; time: string; operator: string; remark?: string }[];
+  statusHistory: StatusHistoryItem[];
 }
 
 export interface Drill {
@@ -134,6 +168,10 @@ export interface Drill {
   evaluation: string;
   organizer: string;
   createdAt: string;
+  scores?: DrillScores;
+  comment?: string;
+  photoUrls?: string[];
+  endTime?: string;
 }
 
 export interface DrillAttendee {

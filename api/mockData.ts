@@ -65,6 +65,12 @@ export const mockOverdueStats = [
 ];
 
 export const mockMonthlyReports = [
+  { month: "2025-07", inspectionTotal: 42, inspectionCompleted: 40, hazardTotal: 15, hazardClosed: 13, drillCount: 1, deviceCheckCount: 148 },
+  { month: "2025-08", inspectionTotal: 40, inspectionCompleted: 39, hazardTotal: 14, hazardClosed: 12, drillCount: 1, deviceCheckCount: 145 },
+  { month: "2025-09", inspectionTotal: 46, inspectionCompleted: 44, hazardTotal: 17, hazardClosed: 15, drillCount: 2, deviceCheckCount: 152 },
+  { month: "2025-10", inspectionTotal: 50, inspectionCompleted: 48, hazardTotal: 20, hazardClosed: 18, drillCount: 1, deviceCheckCount: 160 },
+  { month: "2025-11", inspectionTotal: 44, inspectionCompleted: 42, hazardTotal: 16, hazardClosed: 14, drillCount: 2, deviceCheckCount: 155 },
+  { month: "2025-12", inspectionTotal: 48, inspectionCompleted: 47, hazardTotal: 19, hazardClosed: 17, drillCount: 3, deviceCheckCount: 165 },
   { month: "2026-01", inspectionTotal: 45, inspectionCompleted: 43, hazardTotal: 18, hazardClosed: 15, drillCount: 2, deviceCheckCount: 156 },
   { month: "2026-02", inspectionTotal: 38, inspectionCompleted: 38, hazardTotal: 12, hazardClosed: 12, drillCount: 1, deviceCheckCount: 142 },
   { month: "2026-03", inspectionTotal: 52, inspectionCompleted: 50, hazardTotal: 22, hazardClosed: 19, drillCount: 2, deviceCheckCount: 168 },
@@ -118,4 +124,9 @@ export const mockTodos = [
   { id: "t3", type: "review", title: "复查：C栋车间消防通道堆物整改", priority: "high", deadline: "2026-06-09", relatedId: "h2", relatedName: "C栋车间消防通道堆物" },
   { id: "t4", type: "hazard", title: "指派并加急处理：配电房气体灭火过期", priority: "high", deadline: "2026-06-10", relatedId: "h5", relatedName: "G座配电房气体灭火过期" },
   { id: "t5", type: "inspection", title: "开展C栋车间周度专项检查", priority: "medium", deadline: "2026-06-12", relatedId: "i2", relatedName: "C栋车间周度专项检查" },
+  { id: "t6", type: "inspection", title: "月度全面巡检筹备工作", priority: "low", deadline: "2026-06-20", relatedId: "i3", relatedName: "5月月度全面巡检" },
+  { id: "t7", type: "review", title: "复查：D栋仓储区应急照明（历史）", priority: "low", deadline: "2026-06-15", relatedId: "h4", relatedName: "D栋仓储区应急照明故障" },
+  { id: "t8", type: "hazard", title: "B2层机房烟感探测器整改跟进", priority: "medium", deadline: "2026-06-14", relatedId: "h1", relatedName: "B2层机房烟感探测器失效" },
+  { id: "t9", type: "inspection", title: "G座配电房专项排查（逾期）", priority: "high", deadline: "2026-06-03", relatedId: "i4", relatedName: "配电房专项排查" },
+  { id: "t10", type: "inspection", title: "H座会议中心月度消防设施检查", priority: "low", deadline: "2026-06-18", relatedId: "b8", relatedName: "H座会议中心" },
 ];

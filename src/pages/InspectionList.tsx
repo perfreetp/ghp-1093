@@ -3,6 +3,7 @@ import { useAppStore } from "@/store";
 import {
   inspectionStatusMap,
   inspectionTypeMap,
+  inspectionPointStatusMap,
   formatDate,
   cn,
 } from "@/utils";
@@ -22,6 +23,10 @@ import {
   QrCode,
   CheckCircle2,
   User,
+  Camera,
+  FileText,
+  Save,
+  ChevronUp,
 } from "lucide-react";
 import type { Inspection, InspectionPoint } from "@/types";
 
@@ -33,6 +38,12 @@ const STATUS_TABS = [
   { key: "overdue", label: "已逾期" },
 ];
 
+interface PointEditState {
+  checkedItems: string[];
+  photoUrls: string[];
+  notes: string;
+}
+
 export default function InspectionList() {
   const {
     inspections,
@@ -41,6 +52,7 @@ export default function InspectionList() {
     buildings,
     addInspection,
     currentUser,
+    saveInspectionPoint,
   } = useAppStore();
 
   const [activeTab, setActiveTab] = useState("all");
@@ -48,6 +60,14 @@ export default function InspectionList() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
   const [inspectorFilter, setInspectorFilter] = useState("");
+
+  const [showInspectionModal, setShowInspectionModal] = useState(false);
+  const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null);
+  const [expandedPoints, setExpandedPoints] = useState<Set<string>>(new Set());
+  const [pointEdits, setPointEdits] = useState<Record<string, PointEditState>>({});
+
+  const [showViewRecordModal, setShowViewRecordModal] = useState(false);
+  const [viewRecordPoint, setViewRecordPoint] = useState<InspectionPoint | null>(null);
 
   const [newTask, setNewTask] = useState({
     title: "",
@@ -79,6 +99,16 @@ export default function InspectionList() {
       next.add(id);
     }
     setExpandedRows(next);
+  };
+
+  const togglePointExpand = (pointId: string) => {
+    const next = new Set(expandedPoints);
+    if (next.has(pointId)) {
+      next.delete(pointId);
+    } else {
+      next.add(pointId);
+    }
+    setExpandedPoints(next);
   };
 
   const getPointsForInspection = (inspection: Inspection): InspectionPoint[] => {
@@ -163,6 +193,114 @@ export default function InspectionList() {
       endDate: "",
     });
   };
+
+  const handleOpenInspection = (inspection: Inspection) => {
+    setSelectedInspection(inspection);
+    const points = getPointsForInspection(inspection);
+    const initialEdits: Record<string, PointEditState> = {};
+    points.forEach((p) => {
+      initialEdits[p.id] = {
+        checkedItems: p.checkedItems ? [...p.checkedItems] : [],
+        photoUrls: p.photoUrls ? [...p.photoUrls] : [],
+        notes: p.notes || "",
+      };
+    });
+    setPointEdits(initialEdits);
+    setExpandedPoints(new Set());
+    setShowInspectionModal(true);
+  };
+
+  const handleCloseInspection = () => {
+    setShowInspectionModal(false);
+    setSelectedInspection(null);
+    setExpandedPoints(new Set());
+    setPointEdits({});
+  };
+
+  const handleToggleCheckItem = (pointId: string, item: string) => {
+    setPointEdits((prev) => {
+      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+      const hasItem = current.checkedItems.includes(item);
+      return {
+        ...prev,
+        [pointId]: {
+          ...current,
+          checkedItems: hasItem
+            ? current.checkedItems.filter((i) => i !== item)
+            : [...current.checkedItems, item],
+        },
+      };
+    });
+  };
+
+  const handlePhotoUpload = (pointId: string, e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const fileNames = Array.from(files).map((f) => f.name);
+    setPointEdits((prev) => {
+      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+      return {
+        ...prev,
+        [pointId]: {
+          ...current,
+          photoUrls: [...current.photoUrls, ...fileNames],
+        },
+      };
+    });
+    e.target.value = "";
+  };
+
+  const handleRemovePhoto = (pointId: string, index: number) => {
+    setPointEdits((prev) => {
+      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+      return {
+        ...prev,
+        [pointId]: {
+          ...current,
+          photoUrls: current.photoUrls.filter((_, i) => i !== index),
+        },
+      };
+    });
+  };
+
+  const handleNotesChange = (pointId: string, value: string) => {
+    setPointEdits((prev) => {
+      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+      return {
+        ...prev,
+        [pointId]: {
+          ...current,
+          notes: value,
+        },
+      };
+    });
+  };
+
+  const handleSavePoint = (pointId: string) => {
+    if (!selectedInspection) return;
+    const edit = pointEdits[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+    saveInspectionPoint(selectedInspection.id, pointId, {
+      status: "done",
+      checkedItems: edit.checkedItems,
+      photoUrls: edit.photoUrls,
+      notes: edit.notes,
+    });
+  };
+
+  const handleViewRecord = (point: InspectionPoint) => {
+    setViewRecordPoint(point);
+    setShowViewRecordModal(true);
+  };
+
+  const currentInspectionPoints = useMemo(() => {
+    if (!selectedInspection) return [];
+    return getPointsForInspection(selectedInspection);
+  }, [selectedInspection, inspectionPoints]);
+
+  const currentInspection = useMemo(() => {
+    if (!selectedInspection) return null;
+    return inspections.find((i) => i.id === selectedInspection.id) || selectedInspection;
+  }, [selectedInspection, inspections]);
 
   return (
     <div className="p-6 space-y-6">
@@ -355,10 +493,15 @@ export default function InspectionList() {
                   </td>
                   <td className="table-td">
                     <div className="flex items-center gap-1">
-                      {inspection.status === "pending" && (
-                        <button className="btn-ghost text-industrial-600 hover:text-industrial-700 hover:bg-industrial-50 !px-2 !py-1">
+                      {(inspection.status === "pending" || inspection.status === "in_progress") && (
+                        <button
+                          className="btn-ghost text-industrial-600 hover:text-industrial-700 hover:bg-industrial-50 !px-2 !py-1"
+                          onClick={() => handleOpenInspection(inspection)}
+                        >
                           <Play className="w-4 h-4" />
-                          <span className="text-xs">开始</span>
+                          <span className="text-xs">
+                            {inspection.status === "pending" ? "开始巡检" : "继续巡检"}
+                          </span>
                         </button>
                       )}
                       <button className="btn-ghost text-slate-600 hover:bg-slate-100 !px-2 !py-1">
@@ -382,28 +525,29 @@ export default function InspectionList() {
                         </div>
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                           {getPointsForInspection(inspection).map((point, idx) => {
-                            const completed = inspection.progress > 0 && idx < Math.ceil((inspection.progress / 100) * getPointsForInspection(inspection).length);
+                            const pointStatus = point.status || "pending";
+                            const isDone = pointStatus === "done";
                             return (
                               <div
                                 key={point.id}
                                 className={cn(
                                   "p-3 rounded-lg border transition-all",
-                                  completed
+                                  isDone
                                     ? "bg-emerald-50 border-emerald-200"
                                     : "bg-white border-slate-200 hover:border-industrial-200"
                                 )}
                               >
                                 <div className="flex items-start justify-between mb-2">
-                                  <div className="flex items-center gap-2">
+                                  <div className="flex items-center gap-2 min-w-0">
                                     <span
                                       className={cn(
-                                        "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold",
-                                        completed
+                                        "w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
+                                        isDone
                                           ? "bg-emerald-500 text-white"
                                           : "bg-slate-100 text-slate-600"
                                       )}
                                     >
-                                      {completed ? (
+                                      {isDone ? (
                                         <CheckCircle2 className="w-4 h-4" />
                                       ) : (
                                         idx + 1
@@ -413,8 +557,14 @@ export default function InspectionList() {
                                       {point.location}
                                     </span>
                                   </div>
+                                  <span className={cn(
+                                    "shrink-0",
+                                    inspectionPointStatusMap[pointStatus].className
+                                  )}>
+                                    {inspectionPointStatusMap[pointStatus].label}
+                                  </span>
                                 </div>
-                                <div className="space-y-1 text-xs text-slate-500 pl-8">
+                                <div className="space-y-1.5 text-xs text-slate-500 pl-8">
                                   <div className="flex items-center gap-1">
                                     <Building2 className="w-3 h-3" />
                                     {point.buildingName}
@@ -423,6 +573,15 @@ export default function InspectionList() {
                                     <QrCode className="w-3 h-3" />
                                     {point.qrCode}
                                   </div>
+                                  {isDone && (
+                                    <button
+                                      className="btn-ghost !px-2 !py-1 mt-2 text-industrial-600 hover:bg-industrial-50 w-fit"
+                                      onClick={() => handleViewRecord(point)}
+                                    >
+                                      <FileText className="w-3 h-3" />
+                                      <span>查看记录</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
                             );
@@ -443,6 +602,427 @@ export default function InspectionList() {
           </div>
         )}
       </div>
+
+      {showInspectionModal && currentInspection && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col m-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-industrial-50 to-fire-50">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-3 mb-2">
+                  <h2 className="text-lg font-semibold text-slate-800 truncate">
+                    {currentInspection.title}
+                  </h2>
+                  <span className="badge-blue shrink-0">
+                    {inspectionTypeMap[currentInspection.type]}
+                  </span>
+                  <span className={cn("shrink-0", inspectionStatusMap[currentInspection.status].className)}>
+                    {inspectionStatusMap[currentInspection.status].label}
+                  </span>
+                </div>
+                <div className="flex items-center gap-4 text-xs text-slate-500">
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-6 h-6 rounded-full bg-industrial-100 flex items-center justify-center text-industrial-700 text-[10px] font-semibold">
+                      {currentInspection.inspectorName.slice(0, 2)}
+                    </div>
+                    <span>巡检员：{currentInspection.inspectorName}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>{currentInspection.startDate} ~ {currentInspection.endDate}</span>
+                  </div>
+                </div>
+              </div>
+              <button
+                className="p-1.5 hover:bg-white/60 rounded-md transition-colors ml-4"
+                onClick={handleCloseInspection}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="px-6 py-3 border-b border-slate-100 bg-white">
+              <div className="flex items-center justify-between text-sm mb-2">
+                <span className="text-slate-600 font-medium">
+                  整体进度
+                </span>
+                <span className="font-semibold text-industrial-700">
+                  {currentInspection.progress}%
+                  <span className="text-xs text-slate-400 ml-1">
+                    ({currentInspectionPoints.filter(p => p.status === "done").length}/{currentInspectionPoints.length} 点位)
+                  </span>
+                </span>
+              </div>
+              <div className="progress-bar">
+                <div
+                  className={cn(
+                    "progress-fill transition-all duration-300",
+                    getProgressColor(currentInspection.progress, currentInspection.status)
+                  )}
+                  style={{ width: `${currentInspection.progress}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
+              <div className="space-y-4">
+                {currentInspectionPoints.map((point, idx) => {
+                  const isDone = point.status === "done";
+                  const isExpanded = expandedPoints.has(point.id);
+                  const edit = pointEdits[point.id] || { checkedItems: [], photoUrls: [], notes: "" };
+                  return (
+                    <div
+                      key={point.id}
+                      className={cn(
+                        "rounded-xl border overflow-hidden transition-all bg-white",
+                        isDone ? "border-emerald-200" : "border-slate-200"
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "flex items-center justify-between px-4 py-3 cursor-pointer transition-colors",
+                          isDone ? "bg-emerald-50/60 hover:bg-emerald-50" : "bg-slate-50 hover:bg-slate-100"
+                        )}
+                        onClick={() => togglePointExpand(point.id)}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <span
+                            className={cn(
+                              "w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0",
+                              isDone
+                                ? "bg-emerald-500 text-white"
+                                : "bg-industrial-100 text-industrial-700"
+                            )}
+                          >
+                            {isDone ? (
+                              <CheckCircle2 className="w-5 h-5" />
+                            ) : (
+                              idx + 1
+                            )}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="font-medium text-slate-800 flex items-center gap-2">
+                              <MapPin className="w-4 h-4 text-industrial-500 shrink-0" />
+                              <span className="truncate">{point.location}</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-xs text-slate-500 mt-0.5">
+                              <span className="flex items-center gap-1">
+                                <Building2 className="w-3 h-3" />
+                                {point.buildingName}
+                              </span>
+                              <span className="flex items-center gap-1 font-mono">
+                                <QrCode className="w-3 h-3" />
+                                {point.qrCode}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className={cn(
+                            isDone ? "badge-green" : "badge-gray"
+                          )}>
+                            {isDone ? "已完成" : "待巡检"}
+                          </span>
+                          {isExpanded ? (
+                            <ChevronUp className="w-5 h-5 text-slate-400" />
+                          ) : (
+                            <ChevronDown className="w-5 h-5 text-slate-400" />
+                          )}
+                        </div>
+                      </div>
+
+                      {isExpanded && (
+                        <div className="px-4 py-4 border-t border-slate-100 space-y-4">
+                          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                            <div className="lg:col-span-2 space-y-4">
+                              <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
+                                <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
+                                  <QrCode className="w-3.5 h-3.5" />
+                                  二维码编号
+                                </div>
+                                <div className="bg-white p-3 rounded border border-dashed border-slate-300 text-center">
+                                  <div className="w-24 h-24 mx-auto mb-2 bg-industrial-50 rounded-lg flex items-center justify-center border border-industrial-200">
+                                    <QrCode className="w-16 h-16 text-industrial-600" />
+                                  </div>
+                                  <div className="font-mono text-sm font-semibold text-slate-700">
+                                    {point.qrCode}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="lg:col-span-3 space-y-4">
+                              <div>
+                                <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  检查项（勾选为合格）
+                                </label>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                  {point.items.map((item) => (
+                                    <label
+                                      key={item}
+                                      className={cn(
+                                        "flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-all text-sm",
+                                        edit.checkedItems.includes(item)
+                                          ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                          : "bg-white border-slate-200 hover:border-industrial-200 text-slate-700"
+                                      )}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        className="rounded text-industrial-600 focus:ring-industrial-500 w-4 h-4"
+                                        checked={edit.checkedItems.includes(item)}
+                                        onChange={() => handleToggleCheckItem(point.id, item)}
+                                      />
+                                      <span className="truncate">{item}</span>
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
+                                  <Camera className="w-3.5 h-3.5" />
+                                  上传照片
+                                </label>
+                                <div className="mt-2">
+                                  <label className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-industrial-50 hover:border-industrial-300 cursor-pointer transition-all text-sm text-slate-600">
+                                    <Camera className="w-4 h-4" />
+                                    选择图片
+                                    <input
+                                      type="file"
+                                      accept="image/*"
+                                      multiple
+                                      className="hidden"
+                                      onChange={(e) => handlePhotoUpload(point.id, e)}
+                                    />
+                                  </label>
+                                  {edit.photoUrls.length > 0 && (
+                                    <div className="flex flex-wrap gap-2 mt-3">
+                                      {edit.photoUrls.map((photo, pIdx) => (
+                                        <div
+                                          key={pIdx}
+                                          className="relative group"
+                                        >
+                                          <div className="w-20 h-20 rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-[10px] text-slate-500 overflow-hidden">
+                                            <Camera className="w-6 h-6 mb-1 text-slate-400" />
+                                            <span className="px-1 truncate w-full text-center">{photo}</span>
+                                          </div>
+                                          <button
+                                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-fire-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                            onClick={() => handleRemovePhoto(point.id, pIdx)}
+                                          >
+                                            <X className="w-3 h-3" />
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
+                                  <FileText className="w-3.5 h-3.5" />
+                                  备注说明
+                                </label>
+                                <textarea
+                                  className="input mt-2 min-h-[80px] resize-y"
+                                  placeholder="请输入巡检备注..."
+                                  value={edit.notes}
+                                  onChange={(e) => handleNotesChange(point.id, e.target.value)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                            <button
+                              className="btn-primary"
+                              onClick={() => handleSavePoint(point.id)}
+                            >
+                              <Save className="w-4 h-4" />
+                              保存此点位
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between px-6 py-4 border-t border-slate-100 bg-white">
+              <div className="text-sm text-slate-500">
+                已完成 <span className="font-semibold text-emerald-600">{currentInspectionPoints.filter(p => p.status === "done").length}</span> / {currentInspectionPoints.length} 个点位
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn-outline"
+                  onClick={handleCloseInspection}
+                >
+                  关闭
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showViewRecordModal && viewRecordPoint && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col m-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-emerald-50">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-emerald-600" />
+                  巡检记录详情
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  {viewRecordPoint.location}
+                </p>
+              </div>
+              <button
+                className="p-1.5 hover:bg-white/60 rounded-md transition-colors"
+                onClick={() => {
+                  setShowViewRecordModal(false);
+                  setViewRecordPoint(null);
+                }}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">位置</div>
+                  <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-industrial-500" />
+                    {viewRecordPoint.location}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">楼栋</div>
+                  <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
+                    <Building2 className="w-3.5 h-3.5 text-industrial-500" />
+                    {viewRecordPoint.buildingName}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">二维码</div>
+                  <div className="text-sm font-mono font-medium text-slate-800 flex items-center gap-1">
+                    <QrCode className="w-3.5 h-3.5 text-industrial-500" />
+                    {viewRecordPoint.qrCode}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-slate-500 mb-1">保存时间</div>
+                  <div className="text-sm font-medium text-slate-800">
+                    {viewRecordPoint.savedAt || "-"}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-industrial-500" />
+                  检查项结果
+                </div>
+                <div className="space-y-2">
+                  {viewRecordPoint.items.map((item) => {
+                    const isChecked = viewRecordPoint.checkedItems?.includes(item);
+                    return (
+                      <div
+                        key={item}
+                        className={cn(
+                          "flex items-center gap-3 p-3 rounded-lg border",
+                          isChecked
+                            ? "bg-emerald-50 border-emerald-200"
+                            : "bg-slate-50 border-slate-200"
+                        )}
+                      >
+                        <div
+                          className={cn(
+                            "w-5 h-5 rounded border-2 flex items-center justify-center shrink-0",
+                            isChecked
+                              ? "bg-emerald-500 border-emerald-500"
+                              : "border-slate-300"
+                          )}
+                        >
+                          {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                        </div>
+                        <span
+                          className={cn(
+                            "text-sm",
+                            isChecked ? "text-emerald-800" : "text-slate-600"
+                          )}
+                        >
+                          {item}
+                        </span>
+                        <span
+                          className={cn(
+                            "ml-auto text-xs px-2 py-0.5 rounded-full",
+                            isChecked
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-200 text-slate-500"
+                          )}
+                        >
+                          {isChecked ? "合格" : "未检/不合格"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {viewRecordPoint.photoUrls && viewRecordPoint.photoUrls.length > 0 && (
+                <div>
+                  <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
+                    <Camera className="w-4 h-4 text-industrial-500" />
+                    现场照片（{viewRecordPoint.photoUrls.length}张）
+                  </div>
+                  <div className="grid grid-cols-4 gap-3">
+                    {viewRecordPoint.photoUrls.map((photo, idx) => (
+                      <div
+                        key={idx}
+                        className="aspect-square rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-xs text-slate-500 overflow-hidden"
+                      >
+                        <Camera className="w-8 h-8 mb-1 text-slate-400" />
+                        <span className="px-2 truncate w-full text-center">{photo}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-industrial-500" />
+                  巡检备注
+                </div>
+                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 min-h-[80px]">
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                    {viewRecordPoint.notes || "（无备注）"}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button
+                className="btn-outline"
+                onClick={() => {
+                  setShowViewRecordModal(false);
+                  setViewRecordPoint(null);
+                }}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">

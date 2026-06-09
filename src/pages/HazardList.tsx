@@ -7,6 +7,7 @@ import {
   daysUntil,
   isOverdue,
   cn,
+  roleMap,
 } from "@/utils";
 import {
   LayoutGrid,
@@ -55,13 +56,32 @@ const STATUS_FILTERS = [
 ];
 
 export default function HazardList() {
-  const { hazards, users, updateHazard, addHazard, currentUser } = useAppStore();
+  const { hazards, users, updateHazard, addHazard, currentUser, assignHazard, submitHazardRectify, reviewHazard, revertHazard } = useAppStore();
 
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [levelFilter, setLevelFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [selectedHazard, setSelectedHazard] = useState<Hazard | null>(null);
   const [showRegisterModal, setShowRegisterModal] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showSubmitRectifyModal, setShowSubmitRectifyModal] = useState(false);
+  const [showReviewPassModal, setShowReviewPassModal] = useState(false);
+  const [showRevertModal, setShowRevertModal] = useState(false);
+
+  const [assignForm, setAssignForm] = useState({
+    responsibleId: "",
+    deadline: "",
+    remark: "",
+  });
+  const [submitRectifyForm, setSubmitRectifyForm] = useState({
+    rectifyMeasures: "",
+  });
+  const [reviewForm, setReviewForm] = useState({
+    reviewRemark: "",
+  });
+  const [revertForm, setRevertForm] = useState({
+    reviewRemark: "",
+  });
 
   const [newHazard, setNewHazard] = useState({
     title: "",
@@ -73,7 +93,8 @@ export default function HazardList() {
     responsibleId: "",
   });
 
-  const rectifiers = users.filter((u) => u.role === "rectifier" || u.role === "manager");
+  const rectifiers = users.filter((u) => u.role === "rectifier" || u.role === "manager" || u.role === "engineer");
+  const assignees = users.filter((u) => u.role === "inspector" || u.role === "engineer");
 
   const filteredHazards = useMemo(() => {
     return hazards.filter((h) => {
@@ -172,18 +193,78 @@ export default function HazardList() {
     return actions.filter((a) => a.show);
   };
 
-  const handleStatusChange = (hazard: Hazard, nextStatus: HazardStatus) => {
-    const now = new Date();
-    const history = [
-      ...hazard.history,
-      {
-        status: hazardStatusMap[nextStatus].label,
-        time: formatDateTime(now),
-        operator: currentUser.name,
-      },
-    ];
-    updateHazard(hazard.id, { status: nextStatus, history });
-    setSelectedHazard({ ...hazard, status: nextStatus, history });
+  const openAssignModal = (hazard: Hazard) => {
+    setSelectedHazard(hazard);
+    setAssignForm({
+      responsibleId: "",
+      deadline: hazard.deadline,
+      remark: "",
+    });
+    setShowAssignModal(true);
+  };
+
+  const handleAssignConfirm = () => {
+    if (!selectedHazard || !assignForm.responsibleId || !assignForm.deadline) return;
+    const user = users.find((u) => u.id === assignForm.responsibleId);
+    if (!user) return;
+    assignHazard(selectedHazard.id, {
+      responsibleId: user.id,
+      responsibleName: user.name,
+      responsibleDept: user.dept,
+      deadline: assignForm.deadline,
+      remark: assignForm.remark,
+    });
+    const updated = hazards.find((h) => h.id === selectedHazard.id);
+    if (updated) setSelectedHazard({ ...updated });
+    setShowAssignModal(false);
+  };
+
+  const openSubmitRectifyModal = (hazard: Hazard) => {
+    setSelectedHazard(hazard);
+    setSubmitRectifyForm({ rectifyMeasures: "" });
+    setShowSubmitRectifyModal(true);
+  };
+
+  const handleSubmitRectifyConfirm = () => {
+    if (!selectedHazard || !submitRectifyForm.rectifyMeasures) return;
+    submitHazardRectify(selectedHazard.id, {
+      rectifyMeasures: submitRectifyForm.rectifyMeasures,
+    });
+    const updated = hazards.find((h) => h.id === selectedHazard.id);
+    if (updated) setSelectedHazard({ ...updated });
+    setShowSubmitRectifyModal(false);
+  };
+
+  const openReviewPassModal = (hazard: Hazard) => {
+    setSelectedHazard(hazard);
+    setReviewForm({ reviewRemark: "" });
+    setShowReviewPassModal(true);
+  };
+
+  const handleReviewPassConfirm = () => {
+    if (!selectedHazard) return;
+    reviewHazard(selectedHazard.id, {
+      reviewRemark: reviewForm.reviewRemark || "复查通过，隐患已消除",
+    });
+    const updated = hazards.find((h) => h.id === selectedHazard.id);
+    if (updated) setSelectedHazard({ ...updated });
+    setShowReviewPassModal(false);
+  };
+
+  const openRevertModal = (hazard: Hazard) => {
+    setSelectedHazard(hazard);
+    setRevertForm({ reviewRemark: "" });
+    setShowRevertModal(true);
+  };
+
+  const handleRevertConfirm = () => {
+    if (!selectedHazard || !revertForm.reviewRemark) return;
+    revertHazard(selectedHazard.id, {
+      reviewRemark: revertForm.reviewRemark,
+    });
+    const updated = hazards.find((h) => h.id === selectedHazard.id);
+    if (updated) setSelectedHazard({ ...updated });
+    setShowRevertModal(false);
   };
 
   const handleRegisterHazard = () => {
@@ -198,6 +279,7 @@ export default function HazardList() {
     }
     const building = useAppStore.getState().buildings.find((b) => b.id === newHazard.buildingId);
     const responsible = users.find((u) => u.id === newHazard.responsibleId);
+    const nowTime = formatDateTime(new Date());
     const hazard: Hazard = {
       id: `h${Date.now()}`,
       title: newHazard.title,
@@ -210,7 +292,7 @@ export default function HazardList() {
       photos: [],
       reporterId: currentUser.id,
       reporterName: currentUser.name,
-      reportTime: formatDateTime(new Date()),
+      reportTime: nowTime,
       responsibleId: newHazard.responsibleId,
       responsibleName: responsible?.name || "待指派",
       responsibleDept: responsible?.dept || "",
@@ -218,9 +300,18 @@ export default function HazardList() {
       history: [
         {
           status: "已登记",
-          time: formatDateTime(new Date()),
+          time: nowTime,
           operator: currentUser.name,
           remark: "用户主动登记",
+        },
+      ],
+      statusHistory: [
+        {
+          time: nowTime,
+          fromStatus: "",
+          toStatus: "pending",
+          operator: currentUser.name,
+          description: "用户主动登记隐患",
         },
       ],
     };
@@ -637,33 +728,54 @@ export default function HazardList() {
                   <h4 className="text-sm font-semibold text-slate-700 mb-4">状态变更时间轴</h4>
                   <div className="relative pl-8 space-y-6">
                     <div className="absolute left-3 top-1 bottom-1 w-0.5 bg-slate-200" />
-                    {selectedHazard.history.map((item, idx) => (
+                    {(selectedHazard.statusHistory && selectedHazard.statusHistory.length > 0
+                      ? selectedHazard.statusHistory
+                      : selectedHazard.history.map((h) => ({
+                          time: h.time,
+                          fromStatus: "",
+                          toStatus: "" as any,
+                          operator: h.operator,
+                          description: `${h.status}${h.remark ? " - " + h.remark : ""}`,
+                        }))
+                    ).map((item, idx, arr) => (
                       <div key={idx} className="relative">
                         <div
                           className={cn(
                             "absolute -left-5 top-0.5 w-4 h-4 rounded-full border-2 flex items-center justify-center bg-white",
-                            idx === selectedHazard.history!.length - 1
+                            idx === arr.length - 1
                               ? "border-industrial-500 bg-industrial-500"
                               : "border-slate-300"
                           )}
                         >
-                          {idx === selectedHazard.history!.length - 1 && (
+                          {idx === arr.length - 1 && (
                             <div className="w-1.5 h-1.5 rounded-full bg-white" />
                           )}
                         </div>
                         <div className="pt-0.5">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-sm text-slate-800">
-                              {item.status}
-                            </span>
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            {item.fromStatus && item.toStatus ? (
+                              <>
+                                <span className={hazardStatusMap[item.fromStatus]?.className || "badge-gray"}>
+                                  {hazardStatusMap[item.fromStatus]?.label || item.fromStatus}
+                                </span>
+                                <span className="text-slate-400">→</span>
+                                <span className={hazardStatusMap[item.toStatus]?.className || "badge-gray"}>
+                                  {hazardStatusMap[item.toStatus]?.label || item.toStatus}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="font-medium text-sm text-slate-800">
+                                {selectedHazard.history[idx]?.status || "状态变更"}
+                              </span>
+                            )}
                             <span className="text-xs text-slate-400">{item.time}</span>
                           </div>
                           <div className="text-xs text-slate-500">
                             操作人：{item.operator}
-                            {item.remark && (
+                            {item.description && (
                               <>
                                 <span className="mx-1 text-slate-300">·</span>
-                                {item.remark}
+                                {item.description}
                               </>
                             )}
                           </div>
@@ -681,10 +793,12 @@ export default function HazardList() {
                   <button
                     key={action.key}
                     className={action.className}
-                    onClick={() =>
-                      action.nextStatus &&
-                      handleStatusChange(selectedHazard, action.nextStatus)
-                    }
+                    onClick={() => {
+                      if (action.key === "assign") openAssignModal(selectedHazard);
+                      else if (action.key === "submit_rectify") openSubmitRectifyModal(selectedHazard);
+                      else if (action.key === "review_pass") openReviewPassModal(selectedHazard);
+                      else if (action.key === "review_fail") openRevertModal(selectedHazard);
+                    }}
                   >
                     {action.icon}
                     {action.label}
@@ -836,6 +950,276 @@ export default function HazardList() {
               >
                 <Send className="w-4 h-4" />
                 提交登记
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showAssignModal && selectedHazard && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <UserCheck className="w-5 h-5 text-industrial-500" />
+                指派责任人
+              </h2>
+              <button
+                className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
+                onClick={() => setShowAssignModal(false)}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="p-3 rounded-lg bg-industrial-50 border border-industrial-100">
+                <div className="text-sm font-medium text-industrial-800 mb-1">{selectedHazard.title}</div>
+                <div className="text-xs text-industrial-600">{selectedHazard.buildingName} · {selectedHazard.location}</div>
+              </div>
+
+              <div>
+                <label className="label">整改责任人 <span className="text-fire-500">*</span></label>
+                <select
+                  className="input"
+                  value={assignForm.responsibleId}
+                  onChange={(e) => setAssignForm((p) => ({ ...p, responsibleId: e.target.value }))}
+                >
+                  <option value="">请选择责任人</option>
+                  {assignees.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} - {u.dept}（{roleMap[u.role] || u.role}）
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="label">整改期限 <span className="text-fire-500">*</span></label>
+                <input
+                  type="date"
+                  className="input"
+                  value={assignForm.deadline}
+                  onChange={(e) => setAssignForm((p) => ({ ...p, deadline: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="label">指派备注</label>
+                <textarea
+                  className="input min-h-[100px] resize-none"
+                  placeholder="请输入指派备注说明（可选）"
+                  value={assignForm.remark}
+                  onChange={(e) => setAssignForm((p) => ({ ...p, remark: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button
+                className="btn-outline"
+                onClick={() => setShowAssignModal(false)}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleAssignConfirm}
+                disabled={!assignForm.responsibleId || !assignForm.deadline}
+              >
+                <UserCheck className="w-4 h-4" />
+                确认指派
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showSubmitRectifyModal && selectedHazard && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <Wrench className="w-5 h-5 text-orange-500" />
+                提交整改
+              </h2>
+              <button
+                className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
+                onClick={() => setShowSubmitRectifyModal(false)}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 space-y-5">
+              <div className="p-3 rounded-lg bg-orange-50 border border-orange-100">
+                <div className="text-sm font-medium text-orange-800 mb-1">{selectedHazard.title}</div>
+                <div className="text-xs text-orange-600">责任人：{selectedHazard.responsibleName} · 截止：{selectedHazard.deadline}</div>
+              </div>
+
+              <div>
+                <label className="label">整改说明 <span className="text-fire-500">*</span></label>
+                <textarea
+                  className="input min-h-[120px] resize-none"
+                  placeholder="请详细描述整改措施、处理过程和完成情况..."
+                  value={submitRectifyForm.rectifyMeasures}
+                  onChange={(e) => setSubmitRectifyForm((p) => ({ ...p, rectifyMeasures: e.target.value }))}
+                />
+              </div>
+
+              <div>
+                <label className="label">整改照片</label>
+                <div className="grid grid-cols-4 gap-2">
+                  {[0, 1, 2, 3].map((idx) => (
+                    <div
+                      key={idx}
+                      className="aspect-square rounded-lg bg-slate-50 border border-slate-200 border-dashed flex items-center justify-center cursor-pointer hover:bg-slate-100 transition-colors"
+                    >
+                      <div className="text-center text-slate-400">
+                        <Camera className="w-6 h-6 mx-auto mb-1 opacity-50" />
+                        <span className="text-xs">上传{idx + 1}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 text-xs text-slate-400">（照片功能占位，暂未实现上传）</div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button
+                className="btn-outline"
+                onClick={() => setShowSubmitRectifyModal(false)}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleSubmitRectifyConfirm}
+                disabled={!submitRectifyForm.rectifyMeasures}
+              >
+                <Send className="w-4 h-4" />
+                提交复查
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showReviewPassModal && selectedHazard && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-emerald-500" />
+                确认复查通过
+              </h2>
+              <button
+                className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
+                onClick={() => setShowReviewPassModal(false)}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-100">
+                <div className="text-sm font-medium text-emerald-800 mb-1">{selectedHazard.title}</div>
+                <div className="text-xs text-emerald-600">整改措施：{selectedHazard.rectifyMeasures || "已完成整改"}</div>
+              </div>
+
+              <div>
+                <label className="label">复查意见</label>
+                <textarea
+                  className="input min-h-[100px] resize-none"
+                  placeholder="请输入复查验收意见（可选，默认：复查通过，隐患已消除）"
+                  value={reviewForm.reviewRemark}
+                  onChange={(e) => setReviewForm((p) => ({ ...p, reviewRemark: e.target.value }))}
+                />
+              </div>
+
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <CheckCircle2 className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-700">
+                  确认通过后，该隐患状态将变更为"已关闭"，完成整个整改闭环流程。
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button
+                className="btn-outline"
+                onClick={() => setShowReviewPassModal(false)}
+              >
+                取消
+              </button>
+              <button
+                className="btn-primary"
+                onClick={handleReviewPassConfirm}
+                style={{ backgroundColor: "#059669", borderColor: "#059669" }}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                确认通过
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRevertModal && selectedHazard && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+              <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                <RotateCcw className="w-5 h-5 text-fire-500" />
+                退回整改
+              </h2>
+              <button
+                className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
+                onClick={() => setShowRevertModal(false)}
+              >
+                <X className="w-5 h-5 text-slate-500" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              <div className="p-3 rounded-lg bg-fire-50 border border-fire-100">
+                <div className="text-sm font-medium text-fire-800 mb-1">{selectedHazard.title}</div>
+                <div className="text-xs text-fire-600">当前整改人：{selectedHazard.responsibleName}</div>
+              </div>
+
+              <div>
+                <label className="label">退回原因 <span className="text-fire-500">*</span></label>
+                <textarea
+                  className="input min-h-[120px] resize-none"
+                  placeholder="请详细说明退回整改的原因、需要补充完善的内容..."
+                  value={revertForm.reviewRemark}
+                  onChange={(e) => setRevertForm((p) => ({ ...p, reviewRemark: e.target.value }))}
+                />
+              </div>
+
+              <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-50 border border-amber-200">
+                <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-700">
+                  退回后，该隐患状态将回到"整改中"，责任人需根据退回意见重新进行整改。
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50">
+              <button
+                className="btn-outline"
+                onClick={() => setShowRevertModal(false)}
+              >
+                取消
+              </button>
+              <button
+                className="btn-danger"
+                onClick={handleRevertConfirm}
+                disabled={!revertForm.reviewRemark}
+              >
+                <XCircle className="w-4 h-4" />
+                确认退回
               </button>
             </div>
           </div>

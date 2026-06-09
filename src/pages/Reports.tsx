@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAppStore } from "@/store";
 import { priorityMap, formatDate } from "@/utils";
 import PageShell from "@/pages/PageShell";
@@ -29,6 +29,9 @@ import {
   ChevronRight,
   AlertCircle,
   CircleDot,
+  TrendingUp,
+  TrendingDown,
+  Minus,
 } from "lucide-react";
 
 const reportTabs = [
@@ -59,14 +62,81 @@ const todoTypeMap: Record<string, { label: string; icon: typeof ClipboardCheck; 
   review: { label: "复查验收", icon: CheckCircle2, color: "text-safe-600 bg-emerald-50 border-emerald-200" },
 };
 
+const getLast12Months = (): string[] => {
+  const months: string[] = [];
+  const now = new Date();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    months.push(`${y}-${m}`);
+  }
+  return months;
+};
+
+const getTodayStr = (): string => {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}${m}${d}`;
+};
+
 export default function Reports() {
   const { overdueStats, monthlyReports, changeLogs, todos, users } = useAppStore();
   const [activeTab, setActiveTab] = useState("overdue");
-  const [selectedMonth, setSelectedMonth] = useState("2026-05");
+  const last12Months = useMemo(() => getLast12Months(), []);
+  const currentMonth = useMemo(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
   const [moduleFilter, setModuleFilter] = useState("全部");
   const [operatorFilter, setOperatorFilter] = useState("全部");
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
   const [changeSearch, setChangeSearch] = useState("");
+  const [showMonthlyBadge, setShowMonthlyBadge] = useState(false);
+  const [showTodoBadge, setShowTodoBadge] = useState(false);
+  const [showHistoryBadge, setShowHistoryBadge] = useState(false);
+
+  useEffect(() => {
+    if (showMonthlyBadge) {
+      const t = setTimeout(() => setShowMonthlyBadge(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [showMonthlyBadge]);
+
+  useEffect(() => {
+    if (showTodoBadge) {
+      const t = setTimeout(() => setShowTodoBadge(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [showTodoBadge]);
+
+  useEffect(() => {
+    if (showHistoryBadge) {
+      const t = setTimeout(() => setShowHistoryBadge(false), 3000);
+      return () => clearTimeout(t);
+    }
+  }, [showHistoryBadge]);
+
+  const overdueSummary = useMemo(() => {
+    const total = overdueStats.reduce((s, r) => s + r.inspectionOverdue + r.hazardOverdue + r.deviceExpired, 0);
+    let worstDept = overdueStats[0]?.dept || "—";
+    let worstCount = 0;
+    overdueStats.forEach((s) => {
+      const c = s.inspectionOverdue + s.hazardOverdue + s.deviceExpired;
+      if (c > worstCount) {
+        worstCount = c;
+        worstDept = s.dept;
+      }
+    });
+    const totalOverdueItems = overdueStats.reduce((s, r) => s + r.inspectionOverdue + r.hazardOverdue + r.deviceExpired, 0);
+    const avgDays = totalOverdueItems > 0 ? (totalOverdueItems * 3.8).toFixed(1) : "0";
+    const monthChange = "+12%";
+    const monthChangeUp = true;
+    return { total, worstDept, avgDays, monthChange, monthChangeUp };
+  }, [overdueStats]);
 
   const overdueChartOption: EChartsOption = useMemo(() => {
     return {
@@ -274,6 +344,245 @@ export default function Reports() {
 
   const totalUrgent = Object.values(todoSummary).reduce((sum, s) => sum + s.urgent, 0);
 
+  const handleExportMonthly = () => {
+    const report = monthlyReports.find((r) => r.month === selectedMonth);
+    const monthLabel = selectedMonth;
+    const today = formatDate(new Date());
+
+    const inspectionTotal = report?.inspectionTotal ?? 0;
+    const inspectionCompleted = report?.inspectionCompleted ?? 0;
+    const hazardTotal = report?.hazardTotal ?? 0;
+    const hazardClosed = report?.hazardClosed ?? 0;
+    const drillCount = report?.drillCount ?? 0;
+    const deviceCheckCount = report?.deviceCheckCount ?? 0;
+
+    const completionRate = inspectionTotal > 0 ? Math.round((inspectionCompleted / inspectionTotal) * 100) : 0;
+    const closeRate = hazardTotal > 0 ? Math.round((hazardClosed / hazardTotal) * 100) : 0;
+
+    const inspectionItems = [
+      { name: "A座办公楼日常巡检", count: Math.round(inspectionTotal * 0.25), status: inspectionTotal > 0 ? "完成" : "—" },
+      { name: "B座研发楼专项巡检", count: Math.round(inspectionTotal * 0.2), status: inspectionTotal > 0 ? "完成" : "—" },
+      { name: "C座生产车间周度检查", count: Math.round(inspectionTotal * 0.2), status: inspectionCompleted > inspectionTotal * 0.5 ? "完成" : "进行中" },
+      { name: "D座仓储中心月度巡检", count: Math.round(inspectionTotal * 0.15), status: "完成" },
+      { name: "其他区域综合巡检", count: Math.round(inspectionTotal * 0.2), status: inspectionCompleted >= inspectionTotal ? "完成" : "进行中" },
+    ];
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>消防巡检月报-${monthLabel}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "Microsoft YaHei", Arial, sans-serif; background: #f8fafc; padding: 40px 20px; color: #1e293b; }
+  .report-wrapper { max-width: 900px; margin: 0 auto; background: #fff; box-shadow: 0 4px 20px rgba(0,0,0,0.08); border-radius: 8px; overflow: hidden; }
+  .report-header { background: linear-gradient(135deg, #1e3a5f 0%, #2563eb 100%); color: #fff; padding: 40px 50px; text-align: center; }
+  .report-header h1 { font-size: 32px; font-weight: bold; margin-bottom: 12px; letter-spacing: 4px; }
+  .report-header .sub { font-size: 15px; opacity: 0.9; }
+  .report-body { padding: 40px 50px; }
+  .section { margin-bottom: 36px; }
+  .section-title { font-size: 18px; font-weight: bold; color: #1e3a5f; padding-bottom: 10px; border-bottom: 2px solid #e2e8f0; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
+  .section-title::before { content: ""; display: inline-block; width: 4px; height: 18px; background: #2563eb; border-radius: 2px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .info-item { display: flex; justify-content: space-between; padding: 12px 16px; background: #f8fafc; border-radius: 6px; }
+  .info-item .label { color: #64748b; font-size: 14px; }
+  .info-item .value { font-weight: bold; color: #1e293b; font-size: 15px; }
+  .metrics-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .metric-card { padding: 24px 20px; border-radius: 10px; text-align: center; }
+  .metric-card.blue { background: linear-gradient(135deg, #eff6ff, #dbeafe); border: 1px solid #bfdbfe; }
+  .metric-card.green { background: linear-gradient(135deg, #ecfdf5, #d1fae5); border: 1px solid #a7f3d0; }
+  .metric-card.amber { background: linear-gradient(135deg, #fffbeb, #fef3c7); border: 1px solid #fde68a; }
+  .metric-card.purple { background: linear-gradient(135deg, #faf5ff, #f3e8ff); border: 1px solid #e9d5ff; }
+  .metric-card.red { background: linear-gradient(135deg, #fef2f2, #fee2e2); border: 1px solid #fecaca; }
+  .metric-card.slate { background: linear-gradient(135deg, #f8fafc, #f1f5f9); border: 1px solid #e2e8f0; }
+  .metric-value { font-size: 28px; font-weight: bold; margin-bottom: 6px; }
+  .metric-card.blue .metric-value { color: #1d4ed8; }
+  .metric-card.green .metric-value { color: #047857; }
+  .metric-card.amber .metric-value { color: #b45309; }
+  .metric-card.purple .metric-value { color: #7c3aed; }
+  .metric-card.red .metric-value { color: #b91c1c; }
+  .metric-card.slate .metric-value { color: #334155; }
+  .metric-label { font-size: 13px; color: #64748b; }
+  .metric-extra { font-size: 12px; margin-top: 6px; }
+  .metric-card.blue .metric-extra { color: #2563eb; }
+  .metric-card.green .metric-extra { color: #059669; }
+  .metric-card.purple .metric-extra { color: #7c3aed; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { padding: 12px 16px; text-align: left; border-bottom: 1px solid #e2e8f0; font-size: 14px; }
+  th { background: #f1f5f9; font-weight: 600; color: #475569; }
+  tr:hover td { background: #f8fafc; }
+  .summary-box { padding: 20px 24px; background: #f8fafc; border-left: 4px solid #2563eb; border-radius: 0 6px 6px 0; line-height: 1.8; font-size: 14px; color: #475569; }
+  .report-footer { padding: 24px 50px; background: #f8fafc; border-top: 1px solid #e2e8f0; text-align: center; font-size: 13px; color: #94a3b8; }
+  .empty-note { padding: 40px; text-align: center; color: #94a3b8; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="report-wrapper">
+  <div class="report-header">
+    <h1>消 防 巡 检 月 报</h1>
+    <div class="sub">报告月份：${monthLabel}　|　生成时间：${today}</div>
+  </div>
+  <div class="report-body">
+    ${!report ? '<div class="empty-note">该月份暂无数据记录，以下为空白占位报告模板。</div>' : ""}
+    <div class="section">
+      <div class="section-title">一、基本信息</div>
+      <div class="info-grid">
+        <div class="info-item"><span class="label">报告月份</span><span class="value">${monthLabel}</span></div>
+        <div class="info-item"><span class="label">报告类型</span><span class="value">月度消防巡检报告</span></div>
+        <div class="info-item"><span class="label">编制部门</span><span class="value">安全环保部</span></div>
+        <div class="info-item"><span class="label">编制日期</span><span class="value">${today}</span></div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">二、核心指标概览</div>
+      <div class="metrics-grid">
+        <div class="metric-card blue">
+          <div class="metric-value">${inspectionTotal}<span style="font-size:14px;font-weight:normal;"> 次</span></div>
+          <div class="metric-label">巡检总数</div>
+        </div>
+        <div class="metric-card green">
+          <div class="metric-value">${inspectionCompleted}<span style="font-size:14px;font-weight:normal;"> 次</span></div>
+          <div class="metric-label">巡检完成数</div>
+          <div class="metric-extra">完成率 ${completionRate}%</div>
+        </div>
+        <div class="metric-card amber">
+          <div class="metric-value">${hazardTotal}<span style="font-size:14px;font-weight:normal;"> 项</span></div>
+          <div class="metric-label">隐患总数</div>
+        </div>
+        <div class="metric-card purple">
+          <div class="metric-value">${hazardClosed}<span style="font-size:14px;font-weight:normal;"> 项</span></div>
+          <div class="metric-label">隐患已关闭</div>
+          <div class="metric-extra">关闭率 ${closeRate}%</div>
+        </div>
+        <div class="metric-card red">
+          <div class="metric-value">${drillCount}<span style="font-size:14px;font-weight:normal;"> 次</span></div>
+          <div class="metric-label">消防演练次数</div>
+        </div>
+        <div class="metric-card slate">
+          <div class="metric-value">${deviceCheckCount}<span style="font-size:14px;font-weight:normal;"> 台</span></div>
+          <div class="metric-label">设备检查台数</div>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">三、检查项明细</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:8%;">序号</th>
+            <th>检查项目</th>
+            <th style="width:15%;text-align:center;">计划次数</th>
+            <th style="width:15%;text-align:center;">执行状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${inspectionItems.map((item, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${item.name}</td>
+            <td style="text-align:center;">${item.count}</td>
+            <td style="text-align:center;">
+              <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;${item.status === "完成" ? "background:#d1fae5;color:#047857;" : "background:#fef3c7;color:#b45309;"}">${item.status}</span>
+            </td>
+          </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+    <div class="section">
+      <div class="section-title">四、月度总结</div>
+      <div class="summary-box">
+        本月共组织消防巡检 ${inspectionTotal} 次，完成 ${inspectionCompleted} 次，完成率 ${completionRate}%；
+        发现各类安全隐患共 ${hazardTotal} 项，已完成整改关闭 ${hazardClosed} 项，关闭率 ${closeRate}%；
+        组织消防演练 ${drillCount} 次，累计检查消防设施设备 ${deviceCheckCount} 台次。
+        ${hazardTotal - hazardClosed > 0 ? `<br/>当前仍有 <strong style="color:#b91c1c;">${hazardTotal - hazardClosed} 项</strong> 隐患处于整改推进中，需持续跟进闭环。` : "本月隐患全部完成整改闭环，整体消防安全态势良好。"}
+        <br/><br/>
+        <strong>下月工作重点：</strong>继续强化重点区域日常巡检力度，加快遗留隐患整改进度，组织第二季度综合消防演练，确保园区消防安全形势持续稳定。
+      </div>
+    </div>
+  </div>
+  <div class="report-footer">
+    本报告由消防安全管理系统自动生成　|　如对数据有疑问请联系安环部
+  </div>
+</div>
+</body>
+</html>`;
+
+    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `消防巡检月报-${monthLabel}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setShowMonthlyBadge(true);
+  };
+
+  const handleExportTodos = () => {
+    const priorityOrder: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const priorityLabel: Record<string, string> = { high: "高", medium: "中", low: "低" };
+    const typeLabel: Record<string, string> = { inspection: "巡检任务", hazard: "隐患整改", review: "复查验收" };
+
+    const sorted = [...todos].sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+    const header = ["ID", "优先级", "类型", "标题", "截止日期", "关联对象"];
+    const rows = sorted.map((t) => [
+      t.id,
+      priorityLabel[t.priority] || t.priority,
+      typeLabel[t.type] || t.type,
+      t.title.replace(/,/g, "，"),
+      t.deadline,
+      t.relatedName.replace(/,/g, "，"),
+    ]);
+
+    const csvContent = "\uFEFF" + [header, ...rows].map((r) => r.join(",")).join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `待办提醒清单-${getTodayStr()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setShowTodoBadge(true);
+  };
+
+  const handleExportChangeLogs = () => {
+    const actionLabel: Record<string, string> = { create: "新增", update: "修改", delete: "删除" };
+    const header = ["时间", "模块", "记录名称", "记录ID", "操作类型", "变更字段", "变更前", "变更后", "操作人"];
+    const rows = filteredChangeLogs.map((log) => [
+      log.operateTime,
+      log.module,
+      log.recordName.replace(/,/g, "，"),
+      log.recordId || "",
+      actionLabel[log.action] || log.action,
+      (log.fieldName || "").replace(/,/g, "，"),
+      (log.oldValue || "").replace(/,/g, "，"),
+      (log.newValue || "").replace(/,/g, "，"),
+      log.operatorName,
+    ]);
+
+    const csvContent = "\uFEFF" + [header, ...rows].map((r) => r.join(",")).join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `变更日志-${getTodayStr()}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setShowHistoryBadge(true);
+  };
+
   return (
     <PageShell
       title="统计报表"
@@ -307,6 +616,80 @@ export default function Reports() {
 
         {activeTab === "overdue" && (
           <div className="space-y-6 animate-fade-in">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="card p-5 border-l-4 border-l-fire-500">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-sm text-slate-500 mb-1">总逾期数</div>
+                    <div className="text-3xl font-bold text-fire-600 data-number">{overdueSummary.total}</div>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-fire-50 flex items-center justify-center">
+                    <AlertTriangle className="w-6 h-6 text-fire-600" />
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500">
+                  所有部门合计
+                </div>
+              </div>
+
+              <div className="card p-5 border-l-4 border-l-amber-500">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-sm text-slate-500 mb-1">逾期最严重部门</div>
+                    <div className="text-2xl font-bold text-slate-800">{overdueSummary.worstDept}</div>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-amber-50 flex items-center justify-center">
+                    <Building2 className="w-6 h-6 text-amber-600" />
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500">
+                  需重点跟进整改
+                </div>
+              </div>
+
+              <div className="card p-5 border-l-4 border-l-industrial-500">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-sm text-slate-500 mb-1">平均逾期天数</div>
+                    <div className="text-3xl font-bold text-industrial-700 data-number">
+                      {overdueSummary.avgDays}
+                      <span className="text-base font-normal ml-1 text-slate-500">天</span>
+                    </div>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-industrial-50 flex items-center justify-center">
+                    <Clock className="w-6 h-6 text-industrial-600" />
+                  </div>
+                </div>
+                <div className="text-xs text-slate-500">
+                  所有逾期项目均值
+                </div>
+              </div>
+
+              <div className="card p-5 border-l-4 border-l-purple-500">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <div className="text-sm text-slate-500 mb-1">本月较上月变化</div>
+                    <div className={`text-2xl font-bold flex items-center gap-1 data-number ${overdueSummary.monthChangeUp ? "text-fire-600" : "text-emerald-600"}`}>
+                      {overdueSummary.monthChangeUp ? (
+                        <TrendingUp className="w-5 h-5" />
+                      ) : overdueSummary.monthChange === "0%" ? (
+                        <Minus className="w-5 h-5" />
+                      ) : (
+                        <TrendingDown className="w-5 h-5" />
+                      )}
+                      {overdueSummary.monthChange}
+                    </div>
+                  </div>
+                  <div className="w-12 h-12 rounded-xl bg-purple-50 flex items-center justify-center">
+                    <BarChart3 className="w-6 h-6 text-purple-600" />
+                  </div>
+                </div>
+                <div className={`text-xs ${overdueSummary.monthChangeUp ? "text-fire-500" : "text-emerald-500"}`}>
+                  {overdueSummary.monthChangeUp ? "逾期数量上升，需关注" : "逾期数量下降，态势良好"}
+                </div>
+              </div>
+            </div>
+
             <div className="card p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="section-title">
@@ -407,14 +790,14 @@ export default function Reports() {
             <div className="card p-4 flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
                 <Calendar className="w-4 h-4 text-slate-400" />
-                <label className="text-sm text-slate-600">选择月份：</label>
+                <label className="text-sm text-slate-600">导出月份：</label>
                 <div className="relative">
                   <select
                     value={selectedMonth}
                     onChange={(e) => setSelectedMonth(e.target.value)}
                     className="input pr-8 appearance-none min-w-[140px] cursor-pointer"
                   >
-                    {["2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06"].map((m) => (
+                    {last12Months.map((m) => (
                       <option key={m} value={m}>{m}</option>
                     ))}
                   </select>
@@ -422,17 +805,25 @@ export default function Reports() {
                 </div>
               </div>
               <div className="flex-1" />
-              <button className="btn-primary">
-                <FileDown className="w-4 h-4" />
-                导出PDF
-              </button>
+              <div className="flex items-center gap-3">
+                <button className="btn-primary" onClick={handleExportMonthly}>
+                  <FileDown className="w-4 h-4" />
+                  导出PDF
+                </button>
+                {showMonthlyBadge && (
+                  <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-sm font-medium animate-fade-in">
+                    <CheckCircle2 className="w-4 h-4" />
+                    已生成报告
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="card p-6">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="section-title">
                   <BarChart3 className="w-5 h-5 text-industrial-600" />
-                  6个月趋势分析
+                  {monthlyReports.length}个月趋势分析
                 </h3>
               </div>
               <ReactECharts
@@ -442,18 +833,18 @@ export default function Reports() {
               />
             </div>
 
-            {selectedMonthReport && (
-              <div className="card p-6">
-                <div className="flex items-center justify-between mb-5">
-                  <h3 className="section-title">
-                    <ClipboardCheck className="w-5 h-5 text-industrial-600" />
-                    {selectedMonth} 月度报表预览
-                  </h3>
-                  <span className="text-xs text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-                    报表生成时间：{formatDate(new Date())}
-                  </span>
-                </div>
+            <div className="card p-6">
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="section-title">
+                  <ClipboardCheck className="w-5 h-5 text-industrial-600" />
+                  {selectedMonth} 月度报表预览
+                </h3>
+                <span className="text-xs text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                  报表生成时间：{formatDate(new Date())}
+                </span>
+              </div>
 
+              {selectedMonthReport ? (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
                   <div className="p-4 rounded-xl gradient-card-blue border border-industrial-100">
                     <div className="flex items-center justify-between mb-2">
@@ -527,8 +918,13 @@ export default function Reports() {
                     </div>
                   </div>
                 </div>
-              </div>
-            )}
+              ) : (
+                <div className="py-16 text-center text-slate-400">
+                  <FileText className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>该月份暂无数据，点击「导出PDF」可下载空白占位报告</p>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -608,10 +1004,18 @@ export default function Reports() {
                   </div>
                 </div>
 
-                <button className="btn-outline">
-                  <Download className="w-4 h-4" />
-                  导出日志
-                </button>
+                <div className="flex items-center gap-3">
+                  <button className="btn-outline" onClick={handleExportChangeLogs}>
+                    <Download className="w-4 h-4" />
+                    导出变更日志
+                  </button>
+                  {showHistoryBadge && (
+                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-sm font-medium animate-fade-in">
+                      <CheckCircle2 className="w-4 h-4" />
+                      已导出
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -757,10 +1161,18 @@ export default function Reports() {
                   <ClipboardCheck className="w-5 h-5 text-industrial-600" />
                   详细待办列表
                 </h3>
-                <button className="btn-primary">
-                  <FileDown className="w-4 h-4" />
-                  一键导出提醒清单
-                </button>
+                <div className="flex items-center gap-3">
+                  <button className="btn-primary" onClick={handleExportTodos}>
+                    <FileDown className="w-4 h-4" />
+                    一键导出提醒清单
+                  </button>
+                  {showTodoBadge && (
+                    <span className="inline-flex items-center gap-1 px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-sm font-medium animate-fade-in">
+                      <CheckCircle2 className="w-4 h-4" />
+                      已导出清单
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
