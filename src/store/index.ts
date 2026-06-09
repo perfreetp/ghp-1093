@@ -35,6 +35,63 @@ import {
   mockAlerts,
 } from "@/data/mockData";
 
+const STORAGE_KEY = "fire-inspection-v1";
+
+const PERSIST_FIELDS = [
+  "buildings",
+  "devices",
+  "inspections",
+  "inspectionPoints",
+  "inspectionRecords",
+  "hazards",
+  "drills",
+  "drillAttendees",
+  "changeLogs",
+  "users",
+  "overdueStats",
+  "monthlyReports",
+  "overviewStats",
+  "todos",
+  "alerts",
+] as const;
+
+type PersistState = Pick<AppState, (typeof PERSIST_FIELDS)[number]>;
+
+function getInitialState(): PersistState {
+  const defaults: PersistState = {
+    buildings: mockBuildings,
+    devices: mockDevices,
+    inspections: mockInspections,
+    inspectionPoints: mockInspectionPoints,
+    inspectionRecords: [],
+    hazards: mockHazards,
+    drills: mockDrills,
+    drillAttendees: mockDrillAttendees,
+    changeLogs: mockChangeLogs,
+    users: mockUsers,
+    overdueStats: mockOverdueStats,
+    monthlyReports: mockMonthlyReports,
+    overviewStats: mockOverviewStats,
+    todos: mockTodos,
+    alerts: mockAlerts,
+  };
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (!saved) return defaults;
+    const parsed = JSON.parse(saved) as Partial<PersistState>;
+    const merged: PersistState = { ...defaults };
+    for (const key of PERSIST_FIELDS) {
+      if (parsed[key] !== undefined && parsed[key] !== null) {
+        (merged as any)[key] = parsed[key];
+      }
+    }
+    return merged;
+  } catch (e) {
+    console.error("[store] Failed to parse persisted state, falling back to defaults:", e);
+    return defaults;
+  }
+}
+
 interface AppState {
   buildings: Building[];
   devices: Device[];
@@ -96,6 +153,7 @@ interface AppState {
 
   addDrill: (d: Drill) => void;
   updateDrill: (id: string, data: Partial<Drill>) => void;
+  setDrillPhotos: (id: string, photoUrls: string[]) => void;
   addDrillAttendee: (a: DrillAttendee) => void;
   updateDrillScores: (id: string, scores: DrillScores) => void;
   updateDrillComment: (id: string, comment: string) => void;
@@ -104,25 +162,15 @@ interface AppState {
   completeDrill: (id: string) => void;
 
   addChangeLog: (log: Partial<ChangeLog> & { module: string; recordName: string; action: "create" | "update" | "delete"; operatorName: string; fieldName?: string; oldValue?: string; newValue?: string }) => void;
+
+  resetStore: () => void;
 }
 
+const initialPersisted = getInitialState();
+
 export const useAppStore = create<AppState>((set, get) => ({
-  buildings: mockBuildings,
-  devices: mockDevices,
-  inspections: mockInspections,
-  inspectionPoints: mockInspectionPoints,
-  inspectionRecords: [],
-  hazards: mockHazards,
-  drills: mockDrills,
-  drillAttendees: mockDrillAttendees,
-  changeLogs: mockChangeLogs,
-  users: mockUsers,
-  overdueStats: mockOverdueStats,
-  monthlyReports: mockMonthlyReports,
-  overviewStats: mockOverviewStats,
-  todos: mockTodos,
-  alerts: mockAlerts,
-  currentUser: mockUsers[0],
+  ...initialPersisted,
+  currentUser: initialPersisted.users[0] ?? mockUsers[0],
   sidebarCollapsed: false,
   selectedBuildingId: null,
   selectedHazardId: null,
@@ -520,7 +568,31 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addDrill: (d) => set((s) => ({ drills: [d, ...s.drills] })),
-  updateDrill: (id, data) => set((s) => ({ drills: s.drills.map((d) => (d.id === id ? { ...d, ...data } : d)) })),
+  updateDrill: (id, data) =>
+    set((s) => ({
+      drills: s.drills.map((d) => {
+        if (d.id !== id) return d;
+        const merged: Drill = { ...d, ...data };
+        if (data.photoUrls !== undefined) {
+          merged.photoUrls = [...data.photoUrls];
+        }
+        if (data.scores !== undefined) {
+          merged.scores = { ...data.scores };
+        }
+        return merged;
+      }),
+    })),
+  setDrillPhotos: (id, photoUrls) =>
+    set((s) => ({
+      drills: s.drills.map((d) =>
+        d.id === id
+          ? {
+              ...d,
+              photoUrls: [...photoUrls],
+            }
+          : d
+      ),
+    })),
   addDrillAttendee: (a) => set((s) => ({ drillAttendees: [...s.drillAttendees, a] })),
   updateDrillScores: (id, scores) =>
     set((s) => ({
@@ -582,4 +654,47 @@ export const useAppStore = create<AppState>((set, get) => ({
     };
     set((s) => ({ changeLogs: [newLog, ...s.changeLogs] }));
   },
+
+  resetStore: () => {
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch (e) {
+      console.error("[store] Failed to clear localStorage:", e);
+    }
+    set({
+      buildings: mockBuildings,
+      devices: mockDevices,
+      inspections: mockInspections,
+      inspectionPoints: mockInspectionPoints,
+      inspectionRecords: [],
+      hazards: mockHazards,
+      drills: mockDrills,
+      drillAttendees: mockDrillAttendees,
+      changeLogs: mockChangeLogs,
+      users: mockUsers,
+      overdueStats: mockOverdueStats,
+      monthlyReports: mockMonthlyReports,
+      overviewStats: mockOverviewStats,
+      todos: mockTodos,
+      alerts: mockAlerts,
+      currentUser: mockUsers[0],
+      sidebarCollapsed: false,
+      selectedBuildingId: null,
+      selectedHazardId: null,
+      selectedInspectionId: null,
+      selectedDrillId: null,
+    });
+  },
 }));
+
+useAppStore.subscribe((state) => {
+  try {
+    const toPersist: Partial<PersistState> = {};
+    for (const key of PERSIST_FIELDS) {
+      (toPersist as any)[key] = state[key];
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
+  } catch (e) {
+    console.error("[store] Failed to persist state:", e);
+  }
+});

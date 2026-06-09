@@ -79,7 +79,8 @@ export const inspectionStatusMap: Record<string, { label: string; className: str
 };
 
 export const inspectionPointStatusMap: Record<string, { label: string; className: string }> = {
-  pending: { label: "待巡检", className: "badge-gray" },
+  pending: { label: "待扫码", className: "badge-gray" },
+  scanning: { label: "扫描中", className: "badge-blue" },
   done: { label: "已完成", className: "badge-green" },
 };
 

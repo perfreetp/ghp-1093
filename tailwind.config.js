@@ -63,6 +63,7 @@ export default {
         "slide-in": "slideIn 0.18s ease-out",
         "pulse-danger": "pulseDanger 1.2s ease-in-out 2",
         "stagger-in": "staggerIn 0.4s ease-out both",
+        "scan-line": "scanLine 2s ease-in-out infinite",
       },
       keyframes: {
         fadeIn: {
@@ -80,6 +81,11 @@ export default {
         staggerIn: {
           "0%": { opacity: "0", transform: "translateY(8px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        scanLine: {
+          "0%": { top: "0%" },
+          "50%": { top: "calc(100% - 3px)" },
+          "100%": { top: "0%" },
         },
       },
     },

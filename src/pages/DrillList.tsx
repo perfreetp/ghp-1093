@@ -70,10 +70,8 @@ export default function DrillList() {
   const {
     drills,
     drillAttendees,
-    updateDrillScores,
-    updateDrillComment,
-    addDrillPhoto,
-    deleteDrillPhoto,
+    updateDrill,
+    setDrillPhotos,
     completeDrill,
   } = useAppStore();
   const [statusTab, setStatusTab] = useState<"all" | DrillStatus>("all");
@@ -95,6 +93,7 @@ export default function DrillList() {
   });
   const [localComment, setLocalComment] = useState("");
   const [localPhotoUrls, setLocalPhotoUrls] = useState<string[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -121,10 +120,16 @@ export default function DrillList() {
     });
     setLocalComment(drill.comment || "");
     setLocalPhotoUrls([...(drill.photoUrls || [])]);
+    setHasUnsavedChanges(false);
   };
 
   const closeDrawer = () => {
+    if (hasUnsavedChanges) {
+      const confirmed = window.confirm("有未保存的修改，确认离开？离开会丢失未保存内容。");
+      if (!confirmed) return;
+    }
     setDrawerOpen(false);
+    setHasUnsavedChanges(false);
     setTimeout(() => setSelectedDrill(null), 200);
   };
 
@@ -140,6 +145,7 @@ export default function DrillList() {
       ...prev,
       [dimension]: prev[dimension] === value ? 0 : value,
     }));
+    setHasUnsavedChanges(true);
   };
 
   const handleScoreRemarkChange = (
@@ -150,6 +156,7 @@ export default function DrillList() {
       ...prev,
       [dimension]: value,
     }));
+    setHasUnsavedChanges(true);
   };
 
   const handleAddPhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -162,6 +169,7 @@ export default function DrillList() {
       const result = event.target?.result as string;
       const newPhotoUrls = [...localPhotoUrls, result || `photo-${Date.now()}`].slice(0, 9);
       setLocalPhotoUrls(newPhotoUrls);
+      setHasUnsavedChanges(true);
     };
     reader.readAsDataURL(file);
 
@@ -172,24 +180,17 @@ export default function DrillList() {
 
   const handleDeletePhoto = (index: number) => {
     setLocalPhotoUrls((prev) => prev.filter((_, i) => i !== index));
+    setHasUnsavedChanges(true);
   };
 
   const handleSaveAll = () => {
     if (!selectedDrill) return;
-    updateDrillScores(selectedDrill.id, localScores);
-    updateDrillComment(selectedDrill.id, localComment);
-
-    const currentUrls = selectedDrill.photoUrls || [];
-    const added = localPhotoUrls.slice(currentUrls.length);
-    added.forEach((url) => addDrillPhoto(selectedDrill.id, url));
-
-    currentUrls.forEach((url, idx) => {
-      if (!localPhotoUrls.includes(url)) {
-        const storeIndex = selectedDrill.photoUrls?.indexOf(url) ?? idx;
-        deleteDrillPhoto(selectedDrill.id, storeIndex);
-      }
+    updateDrill(selectedDrill.id, {
+      scores: { ...localScores },
+      comment: localComment,
+      photoUrls: [...localPhotoUrls],
     });
-
+    setHasUnsavedChanges(false);
     showSuccessToast("保存成功");
   };
 
@@ -692,13 +693,15 @@ export default function DrillList() {
                     <div className="card p-5">
                       <textarea
                         value={localComment}
-                        onChange={(e) => setLocalComment(e.target.value)}
-                        onBlur={() => selectedDrill && updateDrillComment(selectedDrill.id, localComment)}
+                        onChange={(e) => {
+                          setLocalComment(e.target.value);
+                          setHasUnsavedChanges(true);
+                        }}
                         placeholder="请输入本次演练综合评价..."
                         className="input min-h-[140px] resize-y text-sm"
                       />
                       <div className="flex items-center justify-between mt-2 text-xs text-slate-400">
-                        <span>失焦自动保存</span>
+                        <span>点击下方保存按钮保存修改</span>
                         <span>{localComment.length} 字</span>
                       </div>
                     </div>

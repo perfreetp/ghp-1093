@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAppStore } from "@/store";
 import {
   inspectionStatusMap,
@@ -27,6 +27,10 @@ import {
   FileText,
   Save,
   ChevronUp,
+  Lock,
+  Unlock,
+  ArrowRight,
+  Sparkles,
 } from "lucide-react";
 import type { Inspection, InspectionPoint } from "@/types";
 
@@ -42,6 +46,182 @@ interface PointEditState {
   checkedItems: string[];
   photoUrls: string[];
   notes: string;
+}
+
+interface ScanModalProps {
+  open: boolean;
+  taskPoints: InspectionPoint[];
+  scanningPointIds: Set<string>;
+  onClose: () => void;
+  onConfirm: (qrCode: string) => { success: boolean; error?: string };
+  onMockScan: () => string;
+}
+
+function ScanModal({
+  open,
+  taskPoints,
+  scanningPointIds,
+  onClose,
+  onConfirm,
+  onMockScan,
+}: ScanModalProps) {
+  const [inputValue, setInputValue] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (open) {
+      setInputValue("");
+      setError(null);
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const pendingCount = taskPoints.filter(
+    (p) => p.status !== "done" && !scanningPointIds.has(p.id)
+  ).length;
+
+  const handleMockScan = () => {
+    const qr = onMockScan();
+    setInputValue(qr);
+    setError(null);
+  };
+
+  const handleConfirm = () => {
+    const result = onConfirm(inputValue.trim());
+    if (!result.success) {
+      setError(result.error || "校验失败");
+    } else {
+      setError(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden animate-slide-in">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-gradient-to-r from-industrial-50 to-slate-50">
+          <div className="flex items-center gap-2">
+            <QrCode className="w-5 h-5 text-industrial-600" />
+            <h3 className="text-lg font-semibold text-slate-800">扫码确认点位</h3>
+          </div>
+          <button
+            className="p-1.5 hover:bg-white rounded-md transition-colors"
+            onClick={onClose}
+          >
+            <X className="w-5 h-5 text-slate-400" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          <div className="relative h-52 rounded-xl border-2 border-dashed border-industrial-300 bg-gradient-to-br from-industrial-50/80 to-white overflow-hidden flex flex-col items-center justify-center">
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute left-0 right-0 h-[3px] bg-gradient-to-r from-transparent via-industrial-500 to-transparent shadow-[0_0_12px_rgba(59,130,246,0.6)] animate-scan-line" />
+            </div>
+            <div className="absolute top-3 left-3 w-5 h-5 border-l-2 border-t-2 border-industrial-400 rounded-tl" />
+            <div className="absolute top-3 right-3 w-5 h-5 border-r-2 border-t-2 border-industrial-400 rounded-tr" />
+            <div className="absolute bottom-3 left-3 w-5 h-5 border-l-2 border-b-2 border-industrial-400 rounded-bl" />
+            <div className="absolute bottom-3 right-3 w-5 h-5 border-r-2 border-b-2 border-industrial-400 rounded-br" />
+
+            <QrCode className="w-20 h-20 text-industrial-400 mb-3 relative z-10" />
+            <p className="text-sm text-slate-500 relative z-10 font-medium">
+              将摄像头对准点位二维码
+            </p>
+            <p className="text-xs text-slate-400 mt-1 relative z-10">
+              待扫点位：<span className="font-semibold text-industrial-600">{pendingCount}</span> 个
+            </p>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-slate-600 mb-1.5 flex items-center gap-1">
+              或手动输入点位码
+            </label>
+            <input
+              type="text"
+              className={cn(
+                "input transition-colors",
+                error && "!border-fire-400 !ring-fire-100 focus:!border-fire-500 focus:!ring-fire-200"
+              )}
+              placeholder="请输入如 QR-A1-001"
+              value={inputValue}
+              onChange={(e) => {
+                setInputValue(e.target.value);
+                if (error) setError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleConfirm();
+              }}
+            />
+            {error && (
+              <div className="mt-2 p-2.5 rounded-lg bg-fire-50 border border-fire-200 text-fire-700 text-xs flex items-start gap-2 animate-fade-in">
+                <span className="mt-0.5">{error.startsWith("⚠️") ? "⚠️" : "❌"}</span>
+                <span className="flex-1 leading-relaxed">{error}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <button
+              className="w-full py-2.5 rounded-lg border-2 border-dashed border-industrial-300 bg-industrial-50/50 text-industrial-700 text-sm font-medium hover:bg-industrial-50 hover:border-industrial-400 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={handleMockScan}
+              disabled={pendingCount === 0}
+            >
+              <Sparkles className="w-4 h-4" />
+              模拟扫码（随机填入未完成点位码）
+            </button>
+            <div className="flex items-center gap-2">
+              <button
+                className="flex-1 btn-outline"
+                onClick={onClose}
+              >
+                取消
+              </button>
+              <button
+                className="flex-1 btn-primary"
+                onClick={handleConfirm}
+                disabled={!inputValue.trim()}
+              >
+                确认
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ToastProps {
+  visible: boolean;
+  message: string;
+  type?: "success" | "error";
+  onClose: () => void;
+}
+
+function Toast({ visible, message, type = "success", onClose }: ToastProps) {
+  useEffect(() => {
+    if (visible) {
+      const t = setTimeout(onClose, 3500);
+      return () => clearTimeout(t);
+    }
+  }, [visible, onClose]);
+
+  if (!visible) return null;
+
+  return (
+    <div className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] animate-slide-in">
+      <div
+        className={cn(
+          "px-6 py-3.5 rounded-xl shadow-2xl flex items-center gap-3",
+          type === "success"
+            ? "bg-gradient-to-r from-emerald-500 to-safe-500 text-white"
+            : "bg-gradient-to-r from-fire-500 to-fire-600 text-white"
+        )}
+      >
+        <CheckCircle2 className="w-5 h-5 shrink-0" />
+        <span className="font-medium text-sm">{message}</span>
+      </div>
+    </div>
+  );
 }
 
 export default function InspectionList() {
@@ -65,9 +245,17 @@ export default function InspectionList() {
   const [selectedInspection, setSelectedInspection] = useState<Inspection | null>(null);
   const [expandedPoints, setExpandedPoints] = useState<Set<string>>(new Set());
   const [pointEdits, setPointEdits] = useState<Record<string, PointEditState>>({});
+  const [scanningPointIds, setScanningPointIds] = useState<Set<string>>(new Set());
+  const [nextHintPointId, setNextHintPointId] = useState<string | null>(null);
 
   const [showViewRecordModal, setShowViewRecordModal] = useState(false);
   const [viewRecordPoint, setViewRecordPoint] = useState<InspectionPoint | null>(null);
+
+  const [showScanModal, setShowScanModal] = useState(false);
+  const [scanTargetPointId, setScanTargetPointId] = useState<string | null>(null);
+
+  const [toastVisible, setToastVisible] = useState(false);
+  const [toastMessage, setToastMessage] = useState("");
 
   const [newTask, setNewTask] = useState({
     title: "",
@@ -102,13 +290,33 @@ export default function InspectionList() {
   };
 
   const togglePointExpand = (pointId: string) => {
-    const next = new Set(expandedPoints);
-    if (next.has(pointId)) {
-      next.delete(pointId);
-    } else {
-      next.add(pointId);
+    const point = currentInspectionPoints.find((p) => p.id === pointId);
+    if (!point) return;
+
+    const isDone = point.status === "done";
+    const isScanning = scanningPointIds.has(pointId);
+
+    if (isDone) {
+      const next = new Set(expandedPoints);
+      if (next.has(pointId)) {
+        next.delete(pointId);
+      } else {
+        next.add(pointId);
+      }
+      setExpandedPoints(next);
+      return;
     }
-    setExpandedPoints(next);
+
+    if (isScanning) {
+      const next = new Set(expandedPoints);
+      if (next.has(pointId)) {
+        next.delete(pointId);
+      } else {
+        next.add(pointId);
+      }
+      setExpandedPoints(next);
+      return;
+    }
   };
 
   const getPointsForInspection = (inspection: Inspection): InspectionPoint[] => {
@@ -207,6 +415,8 @@ export default function InspectionList() {
     });
     setPointEdits(initialEdits);
     setExpandedPoints(new Set());
+    setScanningPointIds(new Set());
+    setNextHintPointId(null);
     setShowInspectionModal(true);
   };
 
@@ -215,6 +425,8 @@ export default function InspectionList() {
     setSelectedInspection(null);
     setExpandedPoints(new Set());
     setPointEdits({});
+    setScanningPointIds(new Set());
+    setNextHintPointId(null);
   };
 
   const handleToggleCheckItem = (pointId: string, item: string) => {
@@ -285,11 +497,87 @@ export default function InspectionList() {
       photoUrls: edit.photoUrls,
       notes: edit.notes,
     });
+
+    const nextScanning = new Set(scanningPointIds);
+    nextScanning.delete(pointId);
+    setScanningPointIds(nextScanning);
+
+    const nextExpanded = new Set(expandedPoints);
+    nextExpanded.delete(pointId);
+    setExpandedPoints(nextExpanded);
+
+    const updatedPoints = currentInspectionPoints.map((p) =>
+      p.id === pointId ? { ...p, status: "done" as const } : p
+    );
+    const nextPending = updatedPoints.find(
+      (p) => p.status !== "done" && !nextScanning.has(p.id)
+    );
+    const allDone = !updatedPoints.some(
+      (p) => p.status !== "done"
+    );
+
+    if (allDone) {
+      setTimeout(() => {
+        setShowInspectionModal(false);
+        setSelectedInspection(null);
+        setExpandedPoints(new Set());
+        setPointEdits({});
+        setScanningPointIds(new Set());
+        setNextHintPointId(null);
+        setToastMessage("🎉 本次巡检任务全部完成！");
+        setToastVisible(true);
+      }, 300);
+    } else if (nextPending) {
+      setNextHintPointId(nextPending.id);
+      setTimeout(() => setNextHintPointId(null), 3000);
+    }
   };
 
   const handleViewRecord = (point: InspectionPoint) => {
     setViewRecordPoint(point);
     setShowViewRecordModal(true);
+  };
+
+  const handleOpenScan = (pointId: string) => {
+    setScanTargetPointId(pointId);
+    setShowScanModal(true);
+  };
+
+  const handleMockScan = (): string => {
+    const pendingPoints = currentInspectionPoints.filter(
+      (p) => p.status !== "done" && !scanningPointIds.has(p.id)
+    );
+    if (pendingPoints.length === 0) return "";
+    return pendingPoints[0].qrCode;
+  };
+
+  const handleConfirmScan = (qrCode: string): { success: boolean; error?: string } => {
+    const matchedPoint = currentInspectionPoints.find((p) => p.qrCode === qrCode);
+    if (!matchedPoint) {
+      return {
+        success: false,
+        error: `❌ 点位码「${qrCode}」不属于本次巡检任务`,
+      };
+    }
+    if (matchedPoint.status === "done") {
+      return {
+        success: false,
+        error: `⚠️ 该点位已经巡检完成，无需重复操作`,
+      };
+    }
+
+    setShowScanModal(false);
+    setScanTargetPointId(null);
+
+    const nextScanning = new Set(scanningPointIds);
+    nextScanning.add(matchedPoint.id);
+    setScanningPointIds(nextScanning);
+
+    const nextExpanded = new Set<string>();
+    nextExpanded.add(matchedPoint.id);
+    setExpandedPoints(nextExpanded);
+
+    return { success: true };
   };
 
   const currentInspectionPoints = useMemo(() => {
@@ -301,6 +589,12 @@ export default function InspectionList() {
     if (!selectedInspection) return null;
     return inspections.find((i) => i.id === selectedInspection.id) || selectedInspection;
   }, [selectedInspection, inspections]);
+
+  const getPointDisplayStatus = (point: InspectionPoint): string => {
+    if (point.status === "done") return "done";
+    if (scanningPointIds.has(point.id)) return "scanning";
+    return "pending";
+  };
 
   return (
     <div className="p-6 space-y-6">
@@ -666,21 +960,38 @@ export default function InspectionList() {
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50">
               <div className="space-y-4">
                 {currentInspectionPoints.map((point, idx) => {
-                  const isDone = point.status === "done";
+                  const displayStatus = getPointDisplayStatus(point);
+                  const isDone = displayStatus === "done";
+                  const isScanning = displayStatus === "scanning";
+                  const isPending = displayStatus === "pending";
                   const isExpanded = expandedPoints.has(point.id);
                   const edit = pointEdits[point.id] || { checkedItems: [], photoUrls: [], notes: "" };
+                  const showHint = nextHintPointId === point.id;
+                  const statusInfo = inspectionPointStatusMap[displayStatus];
+
                   return (
                     <div
                       key={point.id}
                       className={cn(
-                        "rounded-xl border overflow-hidden transition-all bg-white",
-                        isDone ? "border-emerald-200" : "border-slate-200"
+                        "rounded-xl border overflow-hidden transition-all bg-white relative",
+                        isDone && "border-emerald-200",
+                        isScanning && "border-2 border-dashed border-industrial-400 shadow-[0_0_0_3px_rgba(59,130,246,0.1)]",
+                        isPending && "border-slate-200"
                       )}
                     >
+                      {showHint && (
+                        <div className="absolute top-0 left-0 right-0 z-10 px-4 py-2 bg-emerald-500 text-white text-xs font-medium flex items-center gap-2 animate-fade-in">
+                          <ArrowRight className="w-3.5 h-3.5" />
+                          请继续扫描下一个点位
+                        </div>
+                      )}
                       <div
                         className={cn(
                           "flex items-center justify-between px-4 py-3 cursor-pointer transition-colors",
-                          isDone ? "bg-emerald-50/60 hover:bg-emerald-50" : "bg-slate-50 hover:bg-slate-100"
+                          showHint && "pt-10",
+                          isDone && "bg-emerald-50/60 hover:bg-emerald-50",
+                          isScanning && "bg-industrial-50/60 hover:bg-industrial-50",
+                          isPending && "bg-slate-50 hover:bg-slate-100"
                         )}
                         onClick={() => togglePointExpand(point.id)}
                       >
@@ -688,13 +999,15 @@ export default function InspectionList() {
                           <span
                             className={cn(
                               "w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0",
-                              isDone
-                                ? "bg-emerald-500 text-white"
-                                : "bg-industrial-100 text-industrial-700"
+                              isDone && "bg-emerald-500 text-white",
+                              isScanning && "bg-industrial-500 text-white",
+                              isPending && "bg-slate-200 text-slate-500"
                             )}
                           >
                             {isDone ? (
                               <CheckCircle2 className="w-5 h-5" />
+                            ) : isPending ? (
+                              <Lock className="w-4 h-4" />
                             ) : (
                               idx + 1
                             )}
@@ -717,10 +1030,35 @@ export default function InspectionList() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className={cn(
-                            isDone ? "badge-green" : "badge-gray"
-                          )}>
-                            {isDone ? "已完成" : "待巡检"}
+                          {isPending && (
+                            <button
+                              className={cn(
+                                "btn-ghost !px-3 !py-1.5 text-industrial-600 hover:bg-industrial-50 border border-industrial-200",
+                                showHint && "animate-pulse"
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenScan(point.id);
+                              }}
+                            >
+                              <QrCode className="w-4 h-4" />
+                              <span className="text-xs font-medium">扫码/输入点位码</span>
+                            </button>
+                          )}
+                          {isDone && (
+                            <button
+                              className="btn-ghost !px-2 !py-1 text-industrial-600 hover:bg-industrial-50"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleViewRecord(point);
+                              }}
+                            >
+                              <FileText className="w-4 h-4" />
+                              <span className="text-xs">查看记录</span>
+                            </button>
+                          )}
+                          <span className={cn("shrink-0", statusInfo.className)}>
+                            {statusInfo.label}
                           </span>
                           {isExpanded ? (
                             <ChevronUp className="w-5 h-5 text-slate-400" />
@@ -732,118 +1070,167 @@ export default function InspectionList() {
 
                       {isExpanded && (
                         <div className="px-4 py-4 border-t border-slate-100 space-y-4">
-                          <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-                            <div className="lg:col-span-2 space-y-4">
-                              <div className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                                <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
-                                  <QrCode className="w-3.5 h-3.5" />
-                                  二维码编号
-                                </div>
-                                <div className="bg-white p-3 rounded border border-dashed border-slate-300 text-center">
-                                  <div className="w-24 h-24 mx-auto mb-2 bg-industrial-50 rounded-lg flex items-center justify-center border border-industrial-200">
-                                    <QrCode className="w-16 h-16 text-industrial-600" />
-                                  </div>
-                                  <div className="font-mono text-sm font-semibold text-slate-700">
-                                    {point.qrCode}
-                                  </div>
-                                </div>
+                          {isPending ? (
+                            <div className="py-12 text-center space-y-3">
+                              <div className="w-16 h-16 mx-auto rounded-full bg-slate-100 flex items-center justify-center">
+                                <Lock className="w-8 h-8 text-slate-400" />
                               </div>
+                              <p className="text-sm text-slate-500">该点位尚未扫码，无法编辑巡检内容</p>
+                              <button
+                                className="btn-primary mt-2"
+                                onClick={() => handleOpenScan(point.id)}
+                              >
+                                <QrCode className="w-4 h-4" />
+                                立即扫码解锁
+                              </button>
                             </div>
-
-                            <div className="lg:col-span-3 space-y-4">
-                              <div>
-                                <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
-                                  <CheckCircle2 className="w-3.5 h-3.5" />
-                                  检查项（勾选为合格）
-                                </label>
-                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
-                                  {point.items.map((item) => (
-                                    <label
-                                      key={item}
-                                      className={cn(
-                                        "flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-all text-sm",
-                                        edit.checkedItems.includes(item)
-                                          ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                          : "bg-white border-slate-200 hover:border-industrial-200 text-slate-700"
-                                      )}
-                                    >
-                                      <input
-                                        type="checkbox"
-                                        className="rounded text-industrial-600 focus:ring-industrial-500 w-4 h-4"
-                                        checked={edit.checkedItems.includes(item)}
-                                        onChange={() => handleToggleCheckItem(point.id, item)}
-                                      />
-                                      <span className="truncate">{item}</span>
-                                    </label>
-                                  ))}
-                                </div>
-                              </div>
-
-                              <div>
-                                <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
-                                  <Camera className="w-3.5 h-3.5" />
-                                  上传照片
-                                </label>
-                                <div className="mt-2">
-                                  <label className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-industrial-50 hover:border-industrial-300 cursor-pointer transition-all text-sm text-slate-600">
-                                    <Camera className="w-4 h-4" />
-                                    选择图片
-                                    <input
-                                      type="file"
-                                      accept="image/*"
-                                      multiple
-                                      className="hidden"
-                                      onChange={(e) => handlePhotoUpload(point.id, e)}
-                                    />
-                                  </label>
-                                  {edit.photoUrls.length > 0 && (
-                                    <div className="flex flex-wrap gap-2 mt-3">
-                                      {edit.photoUrls.map((photo, pIdx) => (
-                                        <div
-                                          key={pIdx}
-                                          className="relative group"
-                                        >
-                                          <div className="w-20 h-20 rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-[10px] text-slate-500 overflow-hidden">
-                                            <Camera className="w-6 h-6 mb-1 text-slate-400" />
-                                            <span className="px-1 truncate w-full text-center">{photo}</span>
-                                          </div>
-                                          <button
-                                            className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-fire-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                            onClick={() => handleRemovePhoto(point.id, pIdx)}
-                                          >
-                                            <X className="w-3 h-3" />
-                                          </button>
-                                        </div>
-                                      ))}
+                          ) : (
+                            <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+                              <div className="lg:col-span-2 space-y-4">
+                                <div className={cn(
+                                  "p-4 rounded-lg border",
+                                  isScanning ? "bg-industrial-50 border-industrial-200" : "bg-emerald-50 border-emerald-200"
+                                )}>
+                                  <div className="text-xs font-medium text-slate-500 mb-2 flex items-center gap-1">
+                                    {isScanning ? (
+                                      <><Unlock className="w-3.5 h-3.5 text-industrial-600" />已解锁 · 扫描中</>
+                                    ) : (
+                                      <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />已完成巡检</>
+                                    )}
+                                  </div>
+                                  <div className={cn(
+                                    "p-3 rounded border-dashed border text-center",
+                                    isScanning
+                                      ? "bg-white border-industrial-300"
+                                      : "bg-white border-emerald-300"
+                                  )}>
+                                    <div className={cn(
+                                      "w-24 h-24 mx-auto mb-2 rounded-lg flex items-center justify-center border",
+                                      isScanning
+                                        ? "bg-industrial-50 border-industrial-200"
+                                        : "bg-emerald-50 border-emerald-200"
+                                    )}>
+                                      <QrCode className={cn(
+                                        "w-16 h-16",
+                                        isScanning ? "text-industrial-600" : "text-emerald-600"
+                                      )} />
                                     </div>
-                                  )}
+                                    <div className="font-mono text-sm font-semibold text-slate-700">
+                                      {point.qrCode}
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
 
-                              <div>
-                                <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
-                                  <FileText className="w-3.5 h-3.5" />
-                                  备注说明
-                                </label>
-                                <textarea
-                                  className="input mt-2 min-h-[80px] resize-y"
-                                  placeholder="请输入巡检备注..."
-                                  value={edit.notes}
-                                  onChange={(e) => handleNotesChange(point.id, e.target.value)}
-                                />
+                              <div className="lg:col-span-3 space-y-4">
+                                <div>
+                                  <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    检查项（勾选为合格）
+                                  </label>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                                    {point.items.map((item) => {
+                                      const checked = edit.checkedItems.includes(item);
+                                      return (
+                                        <label
+                                          key={item}
+                                          className={cn(
+                                            "flex items-center gap-2 p-2.5 rounded-md border cursor-pointer transition-all text-sm",
+                                            !isScanning && "cursor-default opacity-90",
+                                            checked
+                                              ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                              : "bg-white border-slate-200 hover:border-industrial-200 text-slate-700"
+                                          )}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            className="rounded text-industrial-600 focus:ring-industrial-500 w-4 h-4"
+                                            checked={checked}
+                                            disabled={!isScanning}
+                                            onChange={() => isScanning && handleToggleCheckItem(point.id, item)}
+                                          />
+                                          <span className="truncate">{item}</span>
+                                        </label>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
+                                    <Camera className="w-3.5 h-3.5" />
+                                    上传照片
+                                  </label>
+                                  <div className="mt-2">
+                                    {isScanning ? (
+                                      <label className="inline-flex items-center gap-2 px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-industrial-50 hover:border-industrial-300 cursor-pointer transition-all text-sm text-slate-600">
+                                        <Camera className="w-4 h-4" />
+                                        选择图片
+                                        <input
+                                          type="file"
+                                          accept="image/*"
+                                          multiple
+                                          className="hidden"
+                                          onChange={(e) => handlePhotoUpload(point.id, e)}
+                                        />
+                                      </label>
+                                    ) : (
+                                      <p className="text-xs text-slate-400">（已锁定）</p>
+                                    )}
+                                    {edit.photoUrls.length > 0 && (
+                                      <div className="flex flex-wrap gap-2 mt-3">
+                                        {edit.photoUrls.map((photo, pIdx) => (
+                                          <div
+                                            key={pIdx}
+                                            className="relative group"
+                                          >
+                                            <div className="w-20 h-20 rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-[10px] text-slate-500 overflow-hidden">
+                                              <Camera className="w-6 h-6 mb-1 text-slate-400" />
+                                              <span className="px-1 truncate w-full text-center">{photo}</span>
+                                            </div>
+                                            {isScanning && (
+                                              <button
+                                                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-fire-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+                                                onClick={() => handleRemovePhoto(point.id, pIdx)}
+                                              >
+                                                <X className="w-3 h-3" />
+                                              </button>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                <div>
+                                  <label className="text-xs font-medium text-slate-600 mb-2 flex items-center gap-1">
+                                    <FileText className="w-3.5 h-3.5" />
+                                    备注说明
+                                  </label>
+                                  <textarea
+                                    className="input mt-2 min-h-[80px] resize-y"
+                                    placeholder={isScanning ? "请输入巡检备注..." : "（已锁定）"}
+                                    value={edit.notes}
+                                    disabled={!isScanning}
+                                    onChange={(e) => handleNotesChange(point.id, e.target.value)}
+                                  />
+                                </div>
                               </div>
                             </div>
-                          </div>
+                          )}
 
-                          <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
-                            <button
-                              className="btn-primary"
-                              onClick={() => handleSavePoint(point.id)}
-                            >
-                              <Save className="w-4 h-4" />
-                              保存此点位
-                            </button>
-                          </div>
+                          {isScanning && (
+                            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                              <button
+                                className="btn-primary"
+                                onClick={() => handleSavePoint(point.id)}
+                              >
+                                <Save className="w-4 h-4" />
+                                保存此点位
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1023,6 +1410,25 @@ export default function InspectionList() {
           </div>
         </div>
       )}
+
+      <ScanModal
+        open={showScanModal}
+        taskPoints={currentInspectionPoints}
+        scanningPointIds={scanningPointIds}
+        onClose={() => {
+          setShowScanModal(false);
+          setScanTargetPointId(null);
+        }}
+        onConfirm={handleConfirmScan}
+        onMockScan={handleMockScan}
+      />
+
+      <Toast
+        visible={toastVisible}
+        message={toastMessage}
+        type="success"
+        onClose={() => setToastVisible(false)}
+      />
 
       {showCreateModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">

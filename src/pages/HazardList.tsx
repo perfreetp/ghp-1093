@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useAppStore } from "@/store";
 import {
   hazardLevelMap,
@@ -61,7 +61,9 @@ export default function HazardList() {
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [levelFilter, setLevelFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [selectedHazard, setSelectedHazard] = useState<Hazard | null>(null);
+  const [selectedHazardId, setSelectedHazardId] = useState<string | null>(null);
+  const [detailFlashKey, setDetailFlashKey] = useState(0);
+  const prevStatusRef = useRef<string>("");
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showSubmitRectifyModal, setShowSubmitRectifyModal] = useState(false);
@@ -95,6 +97,23 @@ export default function HazardList() {
 
   const rectifiers = users.filter((u) => u.role === "rectifier" || u.role === "manager" || u.role === "engineer");
   const assignees = users.filter((u) => u.role === "inspector" || u.role === "engineer");
+
+  const selectedHazard = useMemo(() => {
+    if (!selectedHazardId) return null;
+    return hazards.find((h) => h.id === selectedHazardId) || null;
+  }, [hazards, selectedHazardId]);
+
+  useEffect(() => {
+    if (!selectedHazard) {
+      prevStatusRef.current = "";
+      return;
+    }
+    const currentStatus = selectedHazard.status;
+    if (prevStatusRef.current && prevStatusRef.current !== currentStatus) {
+      setDetailFlashKey((k) => k + 1);
+    }
+    prevStatusRef.current = currentStatus;
+  }, [selectedHazard?.status, selectedHazard?.id]);
 
   const filteredHazards = useMemo(() => {
     return hazards.filter((h) => {
@@ -194,7 +213,7 @@ export default function HazardList() {
   };
 
   const openAssignModal = (hazard: Hazard) => {
-    setSelectedHazard(hazard);
+    setSelectedHazardId(hazard.id);
     setAssignForm({
       responsibleId: "",
       deadline: hazard.deadline,
@@ -214,13 +233,11 @@ export default function HazardList() {
       deadline: assignForm.deadline,
       remark: assignForm.remark,
     });
-    const updated = hazards.find((h) => h.id === selectedHazard.id);
-    if (updated) setSelectedHazard({ ...updated });
     setShowAssignModal(false);
   };
 
   const openSubmitRectifyModal = (hazard: Hazard) => {
-    setSelectedHazard(hazard);
+    setSelectedHazardId(hazard.id);
     setSubmitRectifyForm({ rectifyMeasures: "" });
     setShowSubmitRectifyModal(true);
   };
@@ -230,13 +247,11 @@ export default function HazardList() {
     submitHazardRectify(selectedHazard.id, {
       rectifyMeasures: submitRectifyForm.rectifyMeasures,
     });
-    const updated = hazards.find((h) => h.id === selectedHazard.id);
-    if (updated) setSelectedHazard({ ...updated });
     setShowSubmitRectifyModal(false);
   };
 
   const openReviewPassModal = (hazard: Hazard) => {
-    setSelectedHazard(hazard);
+    setSelectedHazardId(hazard.id);
     setReviewForm({ reviewRemark: "" });
     setShowReviewPassModal(true);
   };
@@ -246,13 +261,11 @@ export default function HazardList() {
     reviewHazard(selectedHazard.id, {
       reviewRemark: reviewForm.reviewRemark || "复查通过，隐患已消除",
     });
-    const updated = hazards.find((h) => h.id === selectedHazard.id);
-    if (updated) setSelectedHazard({ ...updated });
     setShowReviewPassModal(false);
   };
 
   const openRevertModal = (hazard: Hazard) => {
-    setSelectedHazard(hazard);
+    setSelectedHazardId(hazard.id);
     setRevertForm({ reviewRemark: "" });
     setShowRevertModal(true);
   };
@@ -262,8 +275,6 @@ export default function HazardList() {
     revertHazard(selectedHazard.id, {
       reviewRemark: revertForm.reviewRemark,
     });
-    const updated = hazards.find((h) => h.id === selectedHazard.id);
-    if (updated) setSelectedHazard({ ...updated });
     setShowRevertModal(false);
   };
 
@@ -334,7 +345,7 @@ export default function HazardList() {
         "card p-4 cursor-pointer card-hover group",
         "border border-slate-200 hover:shadow-lg"
       )}
-      onClick={() => setSelectedHazard(hazard)}
+      onClick={() => setSelectedHazardId(hazard.id)}
     >
       <div className="flex items-start justify-between mb-3">
         <span
@@ -509,7 +520,7 @@ export default function HazardList() {
                 <tr
                   key={hazard.id}
                   className="table-row cursor-pointer"
-                  onClick={() => setSelectedHazard(hazard)}
+                  onClick={() => setSelectedHazardId(hazard.id)}
                 >
                   <td className="table-td">
                     <div className="font-medium text-slate-800 line-clamp-1">
@@ -559,7 +570,7 @@ export default function HazardList() {
 
       {selectedHazard && (
         <div className="fixed inset-0 z-50 flex justify-end bg-slate-900/50 backdrop-blur-sm">
-          <div className="absolute inset-0" onClick={() => setSelectedHazard(null)} />
+          <div className="absolute inset-0" onClick={() => setSelectedHazardId(null)} />
           <div className="relative w-full max-w-xl bg-white shadow-2xl flex flex-col animate-slide-in-right">
             <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
               <div className="flex items-center gap-3">
@@ -570,14 +581,14 @@ export default function HazardList() {
               </div>
               <button
                 className="p-1.5 hover:bg-slate-100 rounded-md transition-colors"
-                onClick={() => setSelectedHazard(null)}
+                onClick={() => setSelectedHazardId(null)}
               >
                 <X className="w-5 h-5 text-slate-500" />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto">
-              <div className="p-6 space-y-6">
+              <div key={detailFlashKey} className="p-6 space-y-6 animate-detail-flash">
                 <div className="flex items-start gap-3">
                   <span className={hazardLevelMap[selectedHazard.level].className}>
                     {getLevelIcon(selectedHazard.level)}
@@ -1239,6 +1250,17 @@ export default function HazardList() {
         }
         .animate-slide-in-right {
           animation: slide-in-right 0.3s ease-out;
+        }
+        @keyframes detail-flash {
+          0% {
+            background-color: rgb(219 234 254 / 0.6);
+          }
+          100% {
+            background-color: transparent;
+          }
+        }
+        .animate-detail-flash {
+          animation: detail-flash 0.8s ease-out;
         }
         .line-clamp-1 {
           display: -webkit-box;

@@ -7,13 +7,14 @@ import {
   User as UserIcon,
   Settings,
   ChevronDown,
+  RotateCcw,
 } from "lucide-react";
 import { useAppStore } from "@/store";
 import { roleMap } from "@/utils";
 import { cn } from "@/utils";
 
 export default function Topbar() {
-  const { currentUser, toggleSidebar, alerts } = useAppStore();
+  const { currentUser, toggleSidebar, alerts, resetStore } = useAppStore();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -169,8 +170,22 @@ export default function Topbar() {
                 </button>
               </div>
               <div className="border-t border-slate-100 py-1">
-                <button className="w-full px-4 py-2 text-left text-sm text-fire-600 hover:bg-fire-50 flex items-center gap-2.5">
-                  <LogOut className="w-4 h-4" />
+                <button
+                  onClick={() => {
+                    if (window.confirm("确认将所有演示数据重置为初始状态？您修改过的内容将全部丢失。")) {
+                      resetStore();
+                      window.location.reload();
+                    }
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm text-fire-600 hover:bg-fire-50 flex items-center gap-2.5"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  重置演示数据
+                </button>
+              </div>
+              <div className="border-t border-slate-100 py-1">
+                <button className="w-full px-4 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5">
+                  <LogOut className="w-4 h-4 text-slate-500" />
                   退出登录
                 </button>
               </div>

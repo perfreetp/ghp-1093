@@ -86,11 +86,17 @@ export default function Reports() {
   const { overdueStats, monthlyReports, changeLogs, todos, users } = useAppStore();
   const [activeTab, setActiveTab] = useState("overdue");
   const last12Months = useMemo(() => getLast12Months(), []);
-  const currentMonth = useMemo(() => {
-    const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  }, []);
-  const [selectedMonth, setSelectedMonth] = useState(currentMonth);
+
+  const availableMonths = useMemo(() => {
+    const reportMonthSet = new Set(monthlyReports.map((r) => r.month));
+    return last12Months.filter((m) => reportMonthSet.has(m));
+  }, [last12Months, monthlyReports]);
+
+  const defaultSelectedMonth = useMemo(() => {
+    return availableMonths.length > 0 ? availableMonths[0] : "";
+  }, [availableMonths]);
+
+  const [selectedMonth, setSelectedMonth] = useState(defaultSelectedMonth);
   const [moduleFilter, setModuleFilter] = useState("全部");
   const [operatorFilter, setOperatorFilter] = useState("全部");
   const [dateRange, setDateRange] = useState({ start: "", end: "" });
@@ -98,6 +104,18 @@ export default function Reports() {
   const [showMonthlyBadge, setShowMonthlyBadge] = useState(false);
   const [showTodoBadge, setShowTodoBadge] = useState(false);
   const [showHistoryBadge, setShowHistoryBadge] = useState(false);
+
+  useEffect(() => {
+    if (availableMonths.length > 0 && !availableMonths.includes(selectedMonth)) {
+      setSelectedMonth(availableMonths[0]);
+    }
+  }, [availableMonths, selectedMonth]);
+
+  const formatMonthLabel = (monthStr: string) => {
+    if (!monthStr) return "";
+    const [y, m] = monthStr.split("-");
+    return `${y}年${parseInt(m)}月`;
+  };
 
   useEffect(() => {
     if (showMonthlyBadge) {
@@ -309,6 +327,8 @@ export default function Reports() {
     return monthlyReports.find((r) => r.month === selectedMonth);
   }, [monthlyReports, selectedMonth]);
 
+  const hasMonthlyData = selectedMonthReport !== undefined;
+
   const filteredChangeLogs = useMemo(() => {
     return changeLogs.filter((log) => {
       if (moduleFilter !== "全部" && log.module !== moduleFilter) return false;
@@ -346,8 +366,10 @@ export default function Reports() {
 
   const handleExportMonthly = () => {
     const report = monthlyReports.find((r) => r.month === selectedMonth);
-    const monthLabel = selectedMonth;
+    const monthLabel = formatMonthLabel(selectedMonth);
+    const monthKey = selectedMonth || "未知月份";
     const today = formatDate(new Date());
+    const hasReport = report !== undefined;
 
     const inspectionTotal = report?.inspectionTotal ?? 0;
     const inspectionCompleted = report?.inspectionCompleted ?? 0;
@@ -359,13 +381,61 @@ export default function Reports() {
     const completionRate = inspectionTotal > 0 ? Math.round((inspectionCompleted / inspectionTotal) * 100) : 0;
     const closeRate = hazardTotal > 0 ? Math.round((hazardClosed / hazardTotal) * 100) : 0;
 
-    const inspectionItems = [
+    const displayValue = (val: number, suffix = "") => {
+      return hasReport ? `${val}${suffix}` : "—";
+    };
+
+    const inspectionItems = hasReport ? [
       { name: "A座办公楼日常巡检", count: Math.round(inspectionTotal * 0.25), status: inspectionTotal > 0 ? "完成" : "—" },
       { name: "B座研发楼专项巡检", count: Math.round(inspectionTotal * 0.2), status: inspectionTotal > 0 ? "完成" : "—" },
       { name: "C座生产车间周度检查", count: Math.round(inspectionTotal * 0.2), status: inspectionCompleted > inspectionTotal * 0.5 ? "完成" : "进行中" },
       { name: "D座仓储中心月度巡检", count: Math.round(inspectionTotal * 0.15), status: "完成" },
       { name: "其他区域综合巡检", count: Math.round(inspectionTotal * 0.2), status: inspectionCompleted >= inspectionTotal ? "完成" : "进行中" },
-    ];
+    ] : [];
+
+    const warningBanner = !hasReport ? `
+    <div style="background:linear-gradient(135deg,#fef3c7 0%,#fde68a 100%);border:1px solid #f59e0b;border-radius:8px;padding:16px 24px;margin-bottom:28px;display:flex;align-items:center;gap:12px;">
+      <span style="font-size:24px;">⚠️</span>
+      <div style="flex:1;">
+        <div style="font-weight:bold;color:#92400e;font-size:15px;">注意：${monthLabel} 暂无巡检月报记录，此为空白模板。</div>
+        <div style="font-size:13px;color:#b45309;margin-top:4px;">所有数据字段为默认占位值，请确认该月是否有巡检活动。</div>
+      </div>
+    </div>` : "";
+
+    const tableBody = hasReport
+      ? inspectionItems.map((item, idx) => `
+          <tr>
+            <td>${idx + 1}</td>
+            <td>${item.name}</td>
+            <td style="text-align:center;">${item.count}</td>
+            <td style="text-align:center;">
+              <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;${item.status === "完成" ? "background:#d1fae5;color:#047857;" : "background:#fef3c7;color:#b45309;"}">${item.status}</span>
+            </td>
+          </tr>
+          `).join("")
+      : `
+          <tr>
+            <td colspan="4" style="padding:60px 20px;text-align:center;color:#94a3b8;font-size:14px;">
+              <div style="font-size:40px;margin-bottom:12px;">📋</div>
+              <div style="font-weight:500;color:#64748b;margin-bottom:6px;">该月份无检查项明细记录</div>
+              <div style="font-size:13px;">如确认该月有巡检活动，请检查数据录入是否完整</div>
+            </td>
+          </tr>`;
+
+    const summaryContent = hasReport
+      ? `本月共组织消防巡检 ${inspectionTotal} 次，完成 ${inspectionCompleted} 次，完成率 ${completionRate}%；
+        发现各类安全隐患共 ${hazardTotal} 项，已完成整改关闭 ${hazardClosed} 项，关闭率 ${closeRate}%；
+        组织消防演练 ${drillCount} 次，累计检查消防设施设备 ${deviceCheckCount} 台次。
+        ${hazardTotal - hazardClosed > 0 ? `<br/>当前仍有 <strong style="color:#b91c1c;">${hazardTotal - hazardClosed} 项</strong> 隐患处于整改推进中，需持续跟进闭环。` : "本月隐患全部完成整改闭环，整体消防安全态势良好。"}
+        <br/><br/>
+        <strong>下月工作重点：</strong>继续强化重点区域日常巡检力度，加快遗留隐患整改进度，组织第二季度综合消防演练，确保园区消防安全形势持续稳定。`
+      : `<div style="color:#94a3b8;text-align:center;padding:20px 0;">
+          <div style="font-size:32px;margin-bottom:10px;">📝</div>
+          <div>该月份暂无月度总结，以下为通用模板占位内容。</div>
+          <div style="margin-top:12px;font-size:13px;color:#94a3b8;">
+            下月工作重点建议：继续强化重点区域日常巡检力度，加快遗留隐患整改进度，定期组织消防演练，确保园区消防安全形势持续稳定。
+          </div>
+        </div>`;
 
     const htmlContent = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -423,7 +493,7 @@ export default function Reports() {
     <div class="sub">报告月份：${monthLabel}　|　生成时间：${today}</div>
   </div>
   <div class="report-body">
-    ${!report ? '<div class="empty-note">该月份暂无数据记录，以下为空白占位报告模板。</div>' : ""}
+    ${warningBanner}
     <div class="section">
       <div class="section-title">一、基本信息</div>
       <div class="info-grid">
@@ -437,29 +507,29 @@ export default function Reports() {
       <div class="section-title">二、核心指标概览</div>
       <div class="metrics-grid">
         <div class="metric-card blue">
-          <div class="metric-value">${inspectionTotal}<span style="font-size:14px;font-weight:normal;"> 次</span></div>
+          <div class="metric-value">${displayValue(inspectionTotal, " 次")}</div>
           <div class="metric-label">巡检总数</div>
         </div>
         <div class="metric-card green">
-          <div class="metric-value">${inspectionCompleted}<span style="font-size:14px;font-weight:normal;"> 次</span></div>
+          <div class="metric-value">${displayValue(inspectionCompleted, " 次")}</div>
           <div class="metric-label">巡检完成数</div>
-          <div class="metric-extra">完成率 ${completionRate}%</div>
+          <div class="metric-extra">${hasReport ? `完成率 ${completionRate}%` : "—"}</div>
         </div>
         <div class="metric-card amber">
-          <div class="metric-value">${hazardTotal}<span style="font-size:14px;font-weight:normal;"> 项</span></div>
+          <div class="metric-value">${displayValue(hazardTotal, " 项")}</div>
           <div class="metric-label">隐患总数</div>
         </div>
         <div class="metric-card purple">
-          <div class="metric-value">${hazardClosed}<span style="font-size:14px;font-weight:normal;"> 项</span></div>
+          <div class="metric-value">${displayValue(hazardClosed, " 项")}</div>
           <div class="metric-label">隐患已关闭</div>
-          <div class="metric-extra">关闭率 ${closeRate}%</div>
+          <div class="metric-extra">${hasReport ? `关闭率 ${closeRate}%` : "—"}</div>
         </div>
         <div class="metric-card red">
-          <div class="metric-value">${drillCount}<span style="font-size:14px;font-weight:normal;"> 次</span></div>
+          <div class="metric-value">${displayValue(drillCount, " 次")}</div>
           <div class="metric-label">消防演练次数</div>
         </div>
         <div class="metric-card slate">
-          <div class="metric-value">${deviceCheckCount}<span style="font-size:14px;font-weight:normal;"> 台</span></div>
+          <div class="metric-value">${displayValue(deviceCheckCount, " 台")}</div>
           <div class="metric-label">设备检查台数</div>
         </div>
       </div>
@@ -476,28 +546,14 @@ export default function Reports() {
           </tr>
         </thead>
         <tbody>
-          ${inspectionItems.map((item, idx) => `
-          <tr>
-            <td>${idx + 1}</td>
-            <td>${item.name}</td>
-            <td style="text-align:center;">${item.count}</td>
-            <td style="text-align:center;">
-              <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;${item.status === "完成" ? "background:#d1fae5;color:#047857;" : "background:#fef3c7;color:#b45309;"}">${item.status}</span>
-            </td>
-          </tr>
-          `).join("")}
+          ${tableBody}
         </tbody>
       </table>
     </div>
     <div class="section">
       <div class="section-title">四、月度总结</div>
       <div class="summary-box">
-        本月共组织消防巡检 ${inspectionTotal} 次，完成 ${inspectionCompleted} 次，完成率 ${completionRate}%；
-        发现各类安全隐患共 ${hazardTotal} 项，已完成整改关闭 ${hazardClosed} 项，关闭率 ${closeRate}%；
-        组织消防演练 ${drillCount} 次，累计检查消防设施设备 ${deviceCheckCount} 台次。
-        ${hazardTotal - hazardClosed > 0 ? `<br/>当前仍有 <strong style="color:#b91c1c;">${hazardTotal - hazardClosed} 项</strong> 隐患处于整改推进中，需持续跟进闭环。` : "本月隐患全部完成整改闭环，整体消防安全态势良好。"}
-        <br/><br/>
-        <strong>下月工作重点：</strong>继续强化重点区域日常巡检力度，加快遗留隐患整改进度，组织第二季度综合消防演练，确保园区消防安全形势持续稳定。
+        ${summaryContent}
       </div>
     </div>
   </div>
@@ -512,7 +568,7 @@ export default function Reports() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `消防巡检月报-${monthLabel}.html`;
+    a.download = `消防巡检月报-${monthKey}.html`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -788,25 +844,37 @@ export default function Reports() {
         {activeTab === "monthly" && (
           <div className="space-y-6 animate-fade-in">
             <div className="card p-4 flex flex-wrap items-center gap-4">
-              <div className="flex items-center gap-2">
-                <Calendar className="w-4 h-4 text-slate-400" />
-                <label className="text-sm text-slate-600">导出月份：</label>
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-slate-400" />
+                  <label className="text-sm text-slate-600">导出月份：</label>
+                  <span className="text-xs text-slate-400">（共 {availableMonths.length} 个月可用）</span>
+                </div>
                 <div className="relative">
                   <select
                     value={selectedMonth}
                     onChange={(e) => setSelectedMonth(e.target.value)}
-                    className="input pr-8 appearance-none min-w-[140px] cursor-pointer"
+                    disabled={availableMonths.length === 0}
+                    className={`input pr-8 appearance-none min-w-[140px] ${availableMonths.length === 0 ? "cursor-not-allowed bg-slate-50 text-slate-400" : "cursor-pointer"}`}
                   >
-                    {last12Months.map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
+                    {availableMonths.length === 0 ? (
+                      <option value="">暂无月度数据</option>
+                    ) : (
+                      availableMonths.map((m) => (
+                        <option key={m} value={m}>{m}</option>
+                      ))
+                    )}
                   </select>
                   <ChevronDown className="w-4 h-4 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 </div>
               </div>
               <div className="flex-1" />
               <div className="flex items-center gap-3">
-                <button className="btn-primary" onClick={handleExportMonthly}>
+                <button
+                  className="btn-primary"
+                  onClick={handleExportMonthly}
+                  disabled={availableMonths.length === 0}
+                >
                   <FileDown className="w-4 h-4" />
                   导出PDF
                 </button>
@@ -834,14 +902,28 @@ export default function Reports() {
             </div>
 
             <div className="card p-6">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="section-title">
-                  <ClipboardCheck className="w-5 h-5 text-industrial-600" />
-                  {selectedMonth} 月度报表预览
-                </h3>
-                <span className="text-xs text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
-                  报表生成时间：{formatDate(new Date())}
-                </span>
+              <div className="mb-6 pb-4 border-b border-slate-100">
+                <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+                      📅 {formatMonthLabel(selectedMonth)} 月度报告预览
+                    </h2>
+                    {hasMonthlyData ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full text-sm font-medium">
+                        <CheckCircle2 className="w-4 h-4" />
+                        数据已完整
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-50 text-amber-700 border border-amber-200 rounded-full text-sm font-medium">
+                        <AlertTriangle className="w-4 h-4" />
+                        无记录
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-xs text-slate-500 bg-slate-100 px-3 py-1 rounded-full">
+                    报表生成时间：{formatDate(new Date())}
+                  </span>
+                </div>
               </div>
 
               {selectedMonthReport ? (
