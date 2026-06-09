@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { useAppStore } from "@/store";
 import {
   inspectionStatusMap,
@@ -6,6 +6,7 @@ import {
   inspectionPointStatusMap,
   formatDate,
   cn,
+  roleMap,
 } from "@/utils";
 import {
   Plus,
@@ -31,8 +32,12 @@ import {
   Unlock,
   ArrowRight,
   Sparkles,
+  ChevronLeft,
 } from "lucide-react";
 import type { Inspection, InspectionPoint } from "@/types";
+
+const PLACEHOLDER_IMG =
+  "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Crect width='80' height='80' fill='%23f1f5f9'/%3E%3Cg fill='%2394a3b8'%3E%3Cpath d='M62 60V24c0-2.21-1.79-4-4-4H22c-2.21 0-4 1.79-4 4v36c0 2.21 1.79 4 4 4h36c2.21 0 4-1.79 4-4zM42 40l-8 10-6-8-8 12h44l-14-16c-.78-.9-2.22-.9-3 0l-5 2z'/%3E%3Ccircle cx='30' cy='32' r='4'/%3E%3C/g%3E%3C/svg%3E";
 
 const STATUS_TABS = [
   { key: "all", label: "全部" },
@@ -45,7 +50,14 @@ const STATUS_TABS = [
 interface PointEditState {
   checkedItems: string[];
   photoUrls: string[];
+  photoFilenames: string[];
   notes: string;
+}
+
+interface LightboxState {
+  open: boolean;
+  photos: { url: string; name: string }[];
+  index: number;
 }
 
 interface ScanModalProps {
@@ -224,6 +236,96 @@ function Toast({ visible, message, type = "success", onClose }: ToastProps) {
   );
 }
 
+interface LightboxProps {
+  state: LightboxState;
+  onClose: () => void;
+  onPrev: () => void;
+  onNext: () => void;
+}
+
+function Lightbox({ state, onClose, onPrev, onNext }: LightboxProps) {
+  const { open, photos, index } = state;
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") onPrev();
+      if (e.key === "ArrowRight") onNext();
+    };
+    window.addEventListener("keydown", handleKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      document.body.style.overflow = "";
+    };
+  }, [open, onClose, onPrev, onNext]);
+
+  if (!open || photos.length === 0) return null;
+
+  const photo = photos[index];
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-fade-in"
+      onClick={onClose}
+    >
+      <button
+        className="absolute top-5 right-5 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors backdrop-blur-sm"
+        onClick={(e) => {
+          e.stopPropagation();
+          onClose();
+        }}
+      >
+        <X className="w-6 h-6" />
+      </button>
+
+      {photos.length > 1 && (
+        <>
+          <button
+            className="absolute left-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors backdrop-blur-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onPrev();
+            }}
+          >
+            <ChevronLeft className="w-7 h-7" />
+          </button>
+          <button
+            className="absolute right-5 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors backdrop-blur-sm"
+            onClick={(e) => {
+              e.stopPropagation();
+              onNext();
+            }}
+          >
+            <ChevronRight className="w-7 h-7" />
+          </button>
+        </>
+      )}
+
+      <div
+        className="flex flex-col items-center max-w-[95vw]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <img
+          src={photo.url}
+          alt={photo.name}
+          className="max-w-5xl max-h-[85vh] object-contain rounded-lg shadow-2xl animate-zoom-in"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG;
+          }}
+        />
+        <div className="mt-4 text-center text-white/90 space-y-1">
+          <div className="text-sm font-medium">{photo.name}</div>
+          <div className="text-xs text-white/60">
+            第 {index + 1} / 共 {photos.length} 张
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function InspectionList() {
   const {
     inspections,
@@ -232,8 +334,15 @@ export default function InspectionList() {
     buildings,
     addInspection,
     currentUser,
+    currentUserId,
     saveInspectionPoint,
+    alignInspectionProgress,
+    updateInspection,
   } = useAppStore();
+
+  const role = currentUser.role;
+  const isInspector = role === "inspector";
+  const isAdmin = ["director", "manager", "admin"].includes(role);
 
   const [activeTab, setActiveTab] = useState("all");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -256,6 +365,13 @@ export default function InspectionList() {
 
   const [toastVisible, setToastVisible] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
+  const [toastType, setToastType] = useState<"success" | "error">("success");
+
+  const [lightbox, setLightbox] = useState<LightboxState>({
+    open: false,
+    photos: [],
+    index: 0,
+  });
 
   const [newTask, setNewTask] = useState({
     title: "",
@@ -269,15 +385,48 @@ export default function InspectionList() {
 
   const inspectors = users.filter((u) => u.role === "inspector");
 
+  const showToast = useCallback((message: string, type: "success" | "error" = "success") => {
+    setToastMessage(message);
+    setToastType(type);
+    setToastVisible(true);
+  }, []);
+
+  const openLightbox = useCallback(
+    (photos: { url: string; name: string }[], startIndex = 0) => {
+      if (photos.length === 0) return;
+      setLightbox({ open: true, photos, index: startIndex });
+    },
+    []
+  );
+
+  const closeLightbox = useCallback(() => {
+    setLightbox((s) => ({ ...s, open: false }));
+  }, []);
+
+  const lightboxPrev = useCallback(() => {
+    setLightbox((s) => ({
+      ...s,
+      index: s.index <= 0 ? s.photos.length - 1 : s.index - 1,
+    }));
+  }, []);
+
+  const lightboxNext = useCallback(() => {
+    setLightbox((s) => ({
+      ...s,
+      index: s.index >= s.photos.length - 1 ? 0 : s.index + 1,
+    }));
+  }, []);
+
   const filteredInspections = useMemo(() => {
     return inspections.filter((item) => {
+      if (isInspector && item.inspectorId !== currentUserId) return false;
       if (activeTab !== "all" && item.status !== activeTab) return false;
       if (dateRange.start && item.startDate < dateRange.start) return false;
       if (dateRange.end && item.endDate > dateRange.end) return false;
       if (inspectorFilter && item.inspectorId !== inspectorFilter) return false;
       return true;
     });
-  }, [inspections, activeTab, dateRange, inspectorFilter]);
+  }, [inspections, activeTab, dateRange, inspectorFilter, isInspector, currentUserId]);
 
   const toggleExpand = (id: string) => {
     const next = new Set(expandedRows);
@@ -296,7 +445,7 @@ export default function InspectionList() {
     const isDone = point.status === "done";
     const isScanning = scanningPointIds.has(pointId);
 
-    if (isDone) {
+    if (isDone || isScanning) {
       const next = new Set(expandedPoints);
       if (next.has(pointId)) {
         next.delete(pointId);
@@ -304,18 +453,6 @@ export default function InspectionList() {
         next.add(pointId);
       }
       setExpandedPoints(next);
-      return;
-    }
-
-    if (isScanning) {
-      const next = new Set(expandedPoints);
-      if (next.has(pointId)) {
-        next.delete(pointId);
-      } else {
-        next.add(pointId);
-      }
-      setExpandedPoints(next);
-      return;
     }
   };
 
@@ -403,13 +540,16 @@ export default function InspectionList() {
   };
 
   const handleOpenInspection = (inspection: Inspection) => {
-    setSelectedInspection(inspection);
-    const points = getPointsForInspection(inspection);
+    alignInspectionProgress(inspection.id);
+    const fresh = useAppStore.getState().inspections.find((i) => i.id === inspection.id);
+    setSelectedInspection(fresh || inspection);
+    const points = getPointsForInspection(fresh || inspection);
     const initialEdits: Record<string, PointEditState> = {};
     points.forEach((p) => {
       initialEdits[p.id] = {
         checkedItems: p.checkedItems ? [...p.checkedItems] : [],
         photoUrls: p.photoUrls ? [...p.photoUrls] : [],
+        photoFilenames: p.photoFilenames ? [...p.photoFilenames] : p.photoUrls ? [...p.photoUrls] : [],
         notes: p.notes || "",
       };
     });
@@ -431,7 +571,7 @@ export default function InspectionList() {
 
   const handleToggleCheckItem = (pointId: string, item: string) => {
     setPointEdits((prev) => {
-      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+      const current = prev[pointId] || { checkedItems: [], photoUrls: [], photoFilenames: [], notes: "" };
       const hasItem = current.checkedItems.includes(item);
       return {
         ...prev,
@@ -448,28 +588,51 @@ export default function InspectionList() {
   const handlePhotoUpload = (pointId: string, e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    const fileNames = Array.from(files).map((f) => f.name);
-    setPointEdits((prev) => {
-      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
-      return {
-        ...prev,
-        [pointId]: {
-          ...current,
-          photoUrls: [...current.photoUrls, ...fileNames],
-        },
-      };
-    });
+    const fileArray = Array.from(files);
+
+    Promise.all(
+      fileArray.map(
+        (file) =>
+          new Promise<{ url: string; name: string }>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              resolve({ url: reader.result as string, name: file.name });
+            };
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+          })
+      )
+    )
+      .then((results) => {
+        setPointEdits((prev) => {
+          const current = prev[pointId] || { checkedItems: [], photoUrls: [], photoFilenames: [], notes: "" };
+          return {
+            ...prev,
+            [pointId]: {
+              ...current,
+              photoUrls: [...current.photoUrls, ...results.map((r) => r.url)],
+              photoFilenames: [...current.photoFilenames, ...results.map((r) => r.name)],
+            },
+          };
+        });
+      })
+      .catch((err) => {
+        console.error("Photo upload failed:", err);
+        showToast("图片读取失败，请重试", "error");
+      });
+
     e.target.value = "";
   };
 
   const handleRemovePhoto = (pointId: string, index: number) => {
     setPointEdits((prev) => {
-      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+      const current = prev[pointId] || { checkedItems: [], photoUrls: [], photoFilenames: [], notes: "" };
       return {
         ...prev,
         [pointId]: {
           ...current,
           photoUrls: current.photoUrls.filter((_, i) => i !== index),
+          photoFilenames: current.photoFilenames.filter((_, i) => i !== index),
         },
       };
     });
@@ -477,7 +640,7 @@ export default function InspectionList() {
 
   const handleNotesChange = (pointId: string, value: string) => {
     setPointEdits((prev) => {
-      const current = prev[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
+      const current = prev[pointId] || { checkedItems: [], photoUrls: [], photoFilenames: [], notes: "" };
       return {
         ...prev,
         [pointId]: {
@@ -490,13 +653,19 @@ export default function InspectionList() {
 
   const handleSavePoint = (pointId: string) => {
     if (!selectedInspection) return;
-    const edit = pointEdits[pointId] || { checkedItems: [], photoUrls: [], notes: "" };
-    saveInspectionPoint(selectedInspection.id, pointId, {
+    const edit = pointEdits[pointId] || { checkedItems: [], photoUrls: [], photoFilenames: [], notes: "" };
+    const result = saveInspectionPoint(selectedInspection.id, pointId, {
       status: "done",
       checkedItems: edit.checkedItems,
       photoUrls: edit.photoUrls,
+      photoFilenames: edit.photoFilenames,
       notes: edit.notes,
     });
+
+    if (!result.success) {
+      showToast(result.error || "保存失败", "error");
+      return;
+    }
 
     const nextScanning = new Set(scanningPointIds);
     nextScanning.delete(pointId);
@@ -506,15 +675,16 @@ export default function InspectionList() {
     nextExpanded.delete(pointId);
     setExpandedPoints(nextExpanded);
 
+    const freshPoints = useAppStore.getState().inspectionPoints;
     const updatedPoints = currentInspectionPoints.map((p) =>
-      p.id === pointId ? { ...p, status: "done" as const } : p
+      p.id === pointId
+        ? freshPoints.find((fp) => fp.id === pointId) || { ...p, status: "done" as const }
+        : p
     );
     const nextPending = updatedPoints.find(
       (p) => p.status !== "done" && !nextScanning.has(p.id)
     );
-    const allDone = !updatedPoints.some(
-      (p) => p.status !== "done"
-    );
+    const allDone = !updatedPoints.some((p) => p.status !== "done");
 
     if (allDone) {
       setTimeout(() => {
@@ -524,8 +694,7 @@ export default function InspectionList() {
         setPointEdits({});
         setScanningPointIds(new Set());
         setNextHintPointId(null);
-        setToastMessage("🎉 本次巡检任务全部完成！");
-        setToastVisible(true);
+        showToast("🎉 本次巡检任务全部完成！");
       }, 300);
     } else if (nextPending) {
       setNextHintPointId(nextPending.id);
@@ -596,6 +765,41 @@ export default function InspectionList() {
     return "pending";
   };
 
+  const renderPhotoThumb = (
+    url: string,
+    name: string,
+    onClick: () => void,
+    showRemove: boolean,
+    onRemove?: () => void
+  ) => (
+    <div key={url + name} className="relative group shrink-0">
+      <div
+        className="w-20 h-20 rounded-lg overflow-hidden border border-slate-200 cursor-pointer hover:ring-2 hover:ring-industrial-400 transition-all bg-slate-100"
+        onClick={onClick}
+      >
+        <img
+          src={url}
+          alt={name}
+          className="object-cover w-full h-full rounded-lg"
+          onError={(e) => {
+            (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG;
+          }}
+        />
+      </div>
+      {showRemove && onRemove && (
+        <button
+          className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-fire-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm z-10"
+          onClick={(e) => {
+            e.stopPropagation();
+            onRemove();
+          }}
+        >
+          <X className="w-3 h-3" />
+        </button>
+      )}
+    </div>
+  );
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -605,13 +809,40 @@ export default function InspectionList() {
             管理消防巡检任务的创建、分配和执行进度
           </p>
         </div>
-        <button
-          className="btn-primary"
-          onClick={() => setShowCreateModal(true)}
-        >
-          <Plus className="w-4 h-4" />
-          新建任务
-        </button>
+        {isAdmin && (
+          <button
+            className="btn-primary"
+            onClick={() => setShowCreateModal(true)}
+          >
+            <Plus className="w-4 h-4" />
+            新建任务
+          </button>
+        )}
+      </div>
+
+      <div
+        className={cn(
+          "card px-5 py-3.5 flex items-center gap-3",
+          isInspector
+            ? "bg-gradient-to-r from-emerald-50 to-industrial-50 border-emerald-200"
+            : "bg-gradient-to-r from-industrial-50 to-slate-50 border-industrial-200"
+        )}
+      >
+        <div className="text-2xl">
+          {isInspector ? "👷" : "📊"}
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-slate-800">
+            {isInspector
+              ? `仅显示指派给您的巡检任务（共 ${filteredInspections.length} 条）`
+              : `显示全部巡检任务（共 ${filteredInspections.length} 条）`}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {isInspector
+              ? `当前登录：${currentUser.name} · 巡检员`
+              : `角色：${roleMap[currentUser.role] || currentUser.role}，可查看和管理所有任务`}
+          </p>
+        </div>
       </div>
 
       <div className="card p-4 space-y-4">
@@ -965,9 +1196,14 @@ export default function InspectionList() {
                   const isScanning = displayStatus === "scanning";
                   const isPending = displayStatus === "pending";
                   const isExpanded = expandedPoints.has(point.id);
-                  const edit = pointEdits[point.id] || { checkedItems: [], photoUrls: [], notes: "" };
+                  const edit = pointEdits[point.id] || { checkedItems: [], photoUrls: [], photoFilenames: [], notes: "" };
                   const showHint = nextHintPointId === point.id;
                   const statusInfo = inspectionPointStatusMap[displayStatus];
+
+                  const photosWithNames = edit.photoUrls.map((url, i) => ({
+                    url,
+                    name: edit.photoFilenames[i] || `照片${i + 1}`,
+                  }));
 
                   return (
                     <div
@@ -1179,25 +1415,15 @@ export default function InspectionList() {
                                     )}
                                     {edit.photoUrls.length > 0 && (
                                       <div className="flex flex-wrap gap-2 mt-3">
-                                        {edit.photoUrls.map((photo, pIdx) => (
-                                          <div
-                                            key={pIdx}
-                                            className="relative group"
-                                          >
-                                            <div className="w-20 h-20 rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-[10px] text-slate-500 overflow-hidden">
-                                              <Camera className="w-6 h-6 mb-1 text-slate-400" />
-                                              <span className="px-1 truncate w-full text-center">{photo}</span>
-                                            </div>
-                                            {isScanning && (
-                                              <button
-                                                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-fire-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-                                                onClick={() => handleRemovePhoto(point.id, pIdx)}
-                                              >
-                                                <X className="w-3 h-3" />
-                                              </button>
-                                            )}
-                                          </div>
-                                        ))}
+                                        {photosWithNames.map((photo, pIdx) =>
+                                          renderPhotoThumb(
+                                            photo.url,
+                                            photo.name,
+                                            () => openLightbox(photosWithNames, pIdx),
+                                            isScanning,
+                                            () => handleRemovePhoto(point.id, pIdx)
+                                          )
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -1256,160 +1482,174 @@ export default function InspectionList() {
         </div>
       )}
 
-      {showViewRecordModal && viewRecordPoint && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col m-4">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-emerald-50">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-emerald-600" />
-                  巡检记录详情
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  {viewRecordPoint.location}
-                </p>
-              </div>
-              <button
-                className="p-1.5 hover:bg-white/60 rounded-md transition-colors"
-                onClick={() => {
-                  setShowViewRecordModal(false);
-                  setViewRecordPoint(null);
-                }}
-              >
-                <X className="w-5 h-5 text-slate-500" />
-              </button>
-            </div>
+      {showViewRecordModal && viewRecordPoint && (() => {
+        const recordPhotos = (viewRecordPoint.photoUrls || []).map((url, i) => ({
+          url,
+          name: (viewRecordPoint.photoFilenames && viewRecordPoint.photoFilenames[i]) || `照片${i + 1}`,
+        }));
 
-            <div className="flex-1 overflow-y-auto p-6 space-y-5">
-              <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col m-4">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-emerald-50">
                 <div>
-                  <div className="text-xs text-slate-500 mb-1">位置</div>
-                  <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-industrial-500" />
+                  <h2 className="text-lg font-semibold text-slate-800 flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-emerald-600" />
+                    巡检记录详情
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-1">
                     {viewRecordPoint.location}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500 mb-1">楼栋</div>
-                  <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
-                    <Building2 className="w-3.5 h-3.5 text-industrial-500" />
-                    {viewRecordPoint.buildingName}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500 mb-1">二维码</div>
-                  <div className="text-sm font-mono font-medium text-slate-800 flex items-center gap-1">
-                    <QrCode className="w-3.5 h-3.5 text-industrial-500" />
-                    {viewRecordPoint.qrCode}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs text-slate-500 mb-1">保存时间</div>
-                  <div className="text-sm font-medium text-slate-800">
-                    {viewRecordPoint.savedAt || "-"}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-industrial-500" />
-                  检查项结果
-                </div>
-                <div className="space-y-2">
-                  {viewRecordPoint.items.map((item) => {
-                    const isChecked = viewRecordPoint.checkedItems?.includes(item);
-                    return (
-                      <div
-                        key={item}
-                        className={cn(
-                          "flex items-center gap-3 p-3 rounded-lg border",
-                          isChecked
-                            ? "bg-emerald-50 border-emerald-200"
-                            : "bg-slate-50 border-slate-200"
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            "w-5 h-5 rounded border-2 flex items-center justify-center shrink-0",
-                            isChecked
-                              ? "bg-emerald-500 border-emerald-500"
-                              : "border-slate-300"
-                          )}
-                        >
-                          {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
-                        </div>
-                        <span
-                          className={cn(
-                            "text-sm",
-                            isChecked ? "text-emerald-800" : "text-slate-600"
-                          )}
-                        >
-                          {item}
-                        </span>
-                        <span
-                          className={cn(
-                            "ml-auto text-xs px-2 py-0.5 rounded-full",
-                            isChecked
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-slate-200 text-slate-500"
-                          )}
-                        >
-                          {isChecked ? "合格" : "未检/不合格"}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {viewRecordPoint.photoUrls && viewRecordPoint.photoUrls.length > 0 && (
-                <div>
-                  <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
-                    <Camera className="w-4 h-4 text-industrial-500" />
-                    现场照片（{viewRecordPoint.photoUrls.length}张）
-                  </div>
-                  <div className="grid grid-cols-4 gap-3">
-                    {viewRecordPoint.photoUrls.map((photo, idx) => (
-                      <div
-                        key={idx}
-                        className="aspect-square rounded-lg bg-slate-100 border border-slate-200 flex flex-col items-center justify-center text-xs text-slate-500 overflow-hidden"
-                      >
-                        <Camera className="w-8 h-8 mb-1 text-slate-400" />
-                        <span className="px-2 truncate w-full text-center">{photo}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
-                  <FileText className="w-4 h-4 text-industrial-500" />
-                  巡检备注
-                </div>
-                <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 min-h-[80px]">
-                  <p className="text-sm text-slate-700 whitespace-pre-wrap">
-                    {viewRecordPoint.notes || "（无备注）"}
                   </p>
                 </div>
+                <button
+                  className="p-1.5 hover:bg-white/60 rounded-md transition-colors"
+                  onClick={() => {
+                    setShowViewRecordModal(false);
+                    setViewRecordPoint(null);
+                  }}
+                >
+                  <X className="w-5 h-5 text-slate-500" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-6 space-y-5">
+                <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 rounded-lg">
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">位置</div>
+                    <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
+                      <MapPin className="w-3.5 h-3.5 text-industrial-500" />
+                      {viewRecordPoint.location}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">楼栋</div>
+                    <div className="text-sm font-medium text-slate-800 flex items-center gap-1">
+                      <Building2 className="w-3.5 h-3.5 text-industrial-500" />
+                      {viewRecordPoint.buildingName}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">二维码</div>
+                    <div className="text-sm font-mono font-medium text-slate-800 flex items-center gap-1">
+                      <QrCode className="w-3.5 h-3.5 text-industrial-500" />
+                      {viewRecordPoint.qrCode}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-slate-500 mb-1">保存时间</div>
+                    <div className="text-sm font-medium text-slate-800">
+                      {viewRecordPoint.savedAt || "-"}
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-industrial-500" />
+                    检查项结果
+                  </div>
+                  <div className="space-y-2">
+                    {viewRecordPoint.items.map((item) => {
+                      const isChecked = viewRecordPoint.checkedItems?.includes(item);
+                      return (
+                        <div
+                          key={item}
+                          className={cn(
+                            "flex items-center gap-3 p-3 rounded-lg border",
+                            isChecked
+                              ? "bg-emerald-50 border-emerald-200"
+                              : "bg-slate-50 border-slate-200"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "w-5 h-5 rounded border-2 flex items-center justify-center shrink-0",
+                              isChecked
+                                ? "bg-emerald-500 border-emerald-500"
+                                : "border-slate-300"
+                            )}
+                          >
+                            {isChecked && <CheckCircle2 className="w-3.5 h-3.5 text-white" />}
+                          </div>
+                          <span
+                            className={cn(
+                              "text-sm",
+                              isChecked ? "text-emerald-800" : "text-slate-600"
+                            )}
+                          >
+                            {item}
+                          </span>
+                          <span
+                            className={cn(
+                              "ml-auto text-xs px-2 py-0.5 rounded-full",
+                              isChecked
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-200 text-slate-500"
+                            )}
+                          >
+                            {isChecked ? "合格" : "未检/不合格"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {recordPhotos.length > 0 && (
+                  <div>
+                    <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
+                      <Camera className="w-4 h-4 text-industrial-500" />
+                      现场照片（{recordPhotos.length}张）
+                    </div>
+                    <div className="grid grid-cols-4 gap-3">
+                      {recordPhotos.map((photo, idx) => (
+                        <div
+                          key={idx}
+                          className="aspect-square rounded-lg overflow-hidden border border-slate-200 cursor-pointer hover:ring-2 hover:ring-industrial-400 transition-all bg-slate-100"
+                          onClick={() => openLightbox(recordPhotos, idx)}
+                        >
+                          <img
+                            src={photo.url}
+                            alt={photo.name}
+                            className="object-cover w-full h-full rounded-lg"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = PLACEHOLDER_IMG;
+                            }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <div className="text-sm font-medium text-slate-700 mb-3 flex items-center gap-1.5">
+                    <FileText className="w-4 h-4 text-industrial-500" />
+                    巡检备注
+                  </div>
+                  <div className="p-4 bg-slate-50 rounded-lg border border-slate-200 min-h-[80px]">
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap">
+                      {viewRecordPoint.notes || "（无备注）"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
+                <button
+                  className="btn-outline"
+                  onClick={() => {
+                    setShowViewRecordModal(false);
+                    setViewRecordPoint(null);
+                  }}
+                >
+                  关闭
+                </button>
               </div>
             </div>
-
-            <div className="flex items-center justify-end px-6 py-4 border-t border-slate-100 bg-slate-50">
-              <button
-                className="btn-outline"
-                onClick={() => {
-                  setShowViewRecordModal(false);
-                  setViewRecordPoint(null);
-                }}
-              >
-                关闭
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       <ScanModal
         open={showScanModal}
@@ -1426,8 +1666,15 @@ export default function InspectionList() {
       <Toast
         visible={toastVisible}
         message={toastMessage}
-        type="success"
+        type={toastType}
         onClose={() => setToastVisible(false)}
+      />
+
+      <Lightbox
+        state={lightbox}
+        onClose={closeLightbox}
+        onPrev={lightboxPrev}
+        onNext={lightboxNext}
       />
 
       {showCreateModal && (

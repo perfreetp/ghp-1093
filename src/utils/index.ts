@@ -124,10 +124,21 @@ export const roleMap: Record<string, string> = {
   engineer: "工程师",
 };
 
-export const priorityMap: Record<string, { label: string; color: string }> = {
-  high: { label: "高", color: "bg-fire-500" },
-  medium: { label: "中", color: "bg-warning-500" },
-  low: { label: "低", color: "bg-safe-500" },
+export const priorityMap: Record<string, { label: string; color: string; className: string }> = {
+  high: { label: "高优先级", color: "bg-fire-500", className: "badge-red" },
+  medium: { label: "中优先级", color: "bg-warning-500", className: "badge-orange" },
+  low: { label: "低优先级", color: "bg-safe-500", className: "badge-green" },
+};
+
+export const maintenanceTypeMap: Record<string, { label: string; icon: string; className: string }> = {
+  repair: { label: "维修", icon: "🔧", className: "badge-orange" },
+  maintenance: { label: "保养", icon: "🛡️", className: "badge-blue" },
+};
+
+export const maintenanceStatusMap: Record<string, { label: string; className: string; dotColor: string }> = {
+  pending: { label: "待处理", className: "badge-gray", dotColor: "bg-slate-400" },
+  in_progress: { label: "处理中", className: "badge-blue", dotColor: "bg-industrial-500" },
+  completed: { label: "已完成", className: "badge-green", dotColor: "bg-safe-500" },
 };
 
 export function genId(prefix = ""): string {

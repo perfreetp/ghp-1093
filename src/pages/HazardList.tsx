@@ -56,7 +56,12 @@ const STATUS_FILTERS = [
 ];
 
 export default function HazardList() {
-  const { hazards, users, updateHazard, addHazard, currentUser, assignHazard, submitHazardRectify, reviewHazard, revertHazard } = useAppStore();
+  const { hazards, users, updateHazard, addHazard, currentUser, currentUserId, assignHazard, submitHazardRectify, reviewHazard, revertHazard } = useAppStore();
+
+  const role = currentUser.role;
+  const isInspector = role === "inspector";
+  const isEngineer = role === "engineer";
+  const isAdmin = ["director", "manager", "admin"].includes(role);
 
   const [viewMode, setViewMode] = useState<"kanban" | "list">("kanban");
   const [levelFilter, setLevelFilter] = useState("all");
@@ -117,11 +122,13 @@ export default function HazardList() {
 
   const filteredHazards = useMemo(() => {
     return hazards.filter((h) => {
+      if (isEngineer && h.responsibleId !== currentUserId) return false;
+      if (isInspector && h.reporterId !== currentUserId) return false;
       if (levelFilter !== "all" && h.level !== levelFilter) return false;
       if (statusFilter !== "all" && h.status !== statusFilter) return false;
       return true;
     });
-  }, [hazards, levelFilter, statusFilter]);
+  }, [hazards, levelFilter, statusFilter, isEngineer, isInspector, currentUserId]);
 
   const groupedByStatus = useMemo(() => {
     const groups: Record<HazardStatus, Hazard[]> = {
@@ -391,13 +398,46 @@ export default function HazardList() {
             跟踪管理安全隐患的全生命周期，确保及时整改闭环
           </p>
         </div>
-        <button
-          className="btn-primary"
-          onClick={() => setShowRegisterModal(true)}
-        >
-          <Plus className="w-4 h-4" />
-          登记隐患
-        </button>
+        {(isAdmin || isInspector) && (
+          <button
+            className="btn-primary"
+            onClick={() => setShowRegisterModal(true)}
+          >
+            <Plus className="w-4 h-4" />
+            登记隐患
+          </button>
+        )}
+      </div>
+
+      <div
+        className={cn(
+          "card px-5 py-3.5 flex items-center gap-3",
+          isEngineer
+            ? "bg-gradient-to-r from-warning-50 to-industrial-50 border-warning-200"
+            : isInspector
+              ? "bg-gradient-to-r from-emerald-50 to-industrial-50 border-emerald-200"
+              : "bg-gradient-to-r from-industrial-50 to-slate-50 border-industrial-200"
+        )}
+      >
+        <div className="text-2xl">
+          {isEngineer ? "🔧" : isInspector ? "👷" : "📊"}
+        </div>
+        <div className="flex-1">
+          <p className="text-sm font-semibold text-slate-800">
+            {isEngineer
+              ? `仅显示指派给您整改的隐患（共 ${filteredHazards.length} 条）`
+              : isInspector
+                ? `仅显示您巡查发现的隐患（共 ${filteredHazards.length} 条）`
+                : `显示全部隐患（共 ${filteredHazards.length} 条）`}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">
+            {isEngineer
+              ? `当前登录：${currentUser.name} · 工程维修 · 负责整改闭环`
+              : isInspector
+                ? `当前登录：${currentUser.name} · 巡检员 · 负责发现与复查`
+                : `角色：${roleMap[currentUser.role] || currentUser.role}，可查看和管理所有隐患`}
+          </p>
+        </div>
       </div>
 
       <div className="card p-4">

@@ -17,6 +17,7 @@ import type {
   InspectionRecord,
   InspectionPointStatus,
   DrillScores,
+  MaintenanceOrder,
 } from "@/types";
 import {
   mockBuildings,
@@ -33,6 +34,7 @@ import {
   mockOverviewStats,
   mockTodos,
   mockAlerts,
+  mockMaintenanceOrders,
 } from "@/data/mockData";
 
 const STORAGE_KEY = "fire-inspection-v1";
@@ -53,6 +55,8 @@ const PERSIST_FIELDS = [
   "overviewStats",
   "todos",
   "alerts",
+  "currentUserId",
+  "maintenanceOrders",
 ] as const;
 
 type PersistState = Pick<AppState, (typeof PERSIST_FIELDS)[number]>;
@@ -74,6 +78,8 @@ function getInitialState(): PersistState {
     overviewStats: mockOverviewStats,
     todos: mockTodos,
     alerts: mockAlerts,
+    currentUserId: "u1",
+    maintenanceOrders: mockMaintenanceOrders,
   };
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -108,6 +114,8 @@ interface AppState {
   overviewStats: OverviewStats;
   todos: TodoItem[];
   alerts: AlertItem[];
+  maintenanceOrders: MaintenanceOrder[];
+  currentUserId: string;
   currentUser: User;
   sidebarCollapsed: boolean;
   selectedBuildingId: string | null;
@@ -120,6 +128,11 @@ interface AppState {
   setSelectedHazardId: (id: string | null) => void;
   setSelectedInspectionId: (id: string | null) => void;
   setSelectedDrillId: (id: string | null) => void;
+  setCurrentUser: (userId: string) => void;
+
+  getUserById: (id: string) => User | undefined;
+  getCurrentRole: () => User["role"] | undefined;
+  getAssignableUsers: () => User[];
 
   addBuilding: (b: Omit<Building, "id" | "createdAt" | "updatedAt"> & { code: string; name: string }) => void;
   updateBuilding: (id: string, data: Partial<Building>) => void;
@@ -140,9 +153,11 @@ interface AppState {
       status: InspectionPointStatus;
       checkedItems: string[];
       photoUrls: string[];
+      photoFilenames?: string[];
       notes: string;
     }
-  ) => void;
+  ) => { success: boolean; error?: string };
+  alignInspectionProgress: (inspectionId: string) => number;
 
   addHazard: (h: Hazard) => void;
   updateHazard: (id: string, data: Partial<Hazard>) => void;
@@ -161,6 +176,21 @@ interface AppState {
   deleteDrillPhoto: (id: string, index: number) => void;
   completeDrill: (id: string) => void;
 
+  createMaintenanceOrder: (data: {
+    deviceId: string;
+    type: "repair" | "maintenance";
+    priority: "high" | "medium" | "low";
+    description: string;
+    handlerId: string;
+    expectedDate: string;
+  }) => MaintenanceOrder | null;
+  startMaintenance: (id: string) => void;
+  completeMaintenance: (
+    id: string,
+    params: { processRecord: string; cost?: number; photoUrls?: string[] }
+  ) => void;
+  getDeviceMaintenanceOrders: (deviceId: string) => MaintenanceOrder[];
+
   addChangeLog: (log: Partial<ChangeLog> & { module: string; recordName: string; action: "create" | "update" | "delete"; operatorName: string; fieldName?: string; oldValue?: string; newValue?: string }) => void;
 
   resetStore: () => void;
@@ -170,7 +200,11 @@ const initialPersisted = getInitialState();
 
 export const useAppStore = create<AppState>((set, get) => ({
   ...initialPersisted,
-  currentUser: initialPersisted.users[0] ?? mockUsers[0],
+  currentUserId: initialPersisted.currentUserId || "u1",
+  currentUser:
+    initialPersisted.users.find((u) => u.id === (initialPersisted.currentUserId || "u1")) ??
+    initialPersisted.users[0] ??
+    mockUsers[0],
   sidebarCollapsed: false,
   selectedBuildingId: null,
   selectedHazardId: null,
@@ -182,6 +216,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   setSelectedHazardId: (id) => set({ selectedHazardId: id }),
   setSelectedInspectionId: (id) => set({ selectedInspectionId: id }),
   setSelectedDrillId: (id) => set({ selectedDrillId: id }),
+
+  setCurrentUser: (userId) => {
+    const { users } = get();
+    const user = users.find((u) => u.id === userId);
+    if (user) {
+      set({ currentUserId: userId, currentUser: user });
+    }
+  },
+
+  getUserById: (id) => get().users.find((u) => u.id === id),
+  getCurrentRole: () => {
+    const { currentUserId, users } = get();
+    return users.find((u) => u.id === currentUserId)?.role;
+  },
+  getAssignableUsers: () =>
+    get().users.filter((u) => ["inspector", "engineer"].includes(u.role)),
 
   addBuilding: (b) => {
     const { currentUser, addChangeLog } = get();
@@ -294,9 +344,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   addInspection: (i) => set((s) => ({ inspections: [i, ...s.inspections] })),
   updateInspection: (id, data) => set((s) => ({ inspections: s.inspections.map((i) => (i.id === id ? { ...i, ...data } : i)) })),
   addInspectionRecord: (r) => set((s) => ({ inspectionRecords: [...s.inspectionRecords, r] })),
-  saveInspectionPoint: (inspectionId, pointId, data) =>
+  saveInspectionPoint: (inspectionId, pointId, data) => {
+    const now = new Date().toISOString().slice(0, 16).replace("T", " ");
+    let success = true;
+    let error: string | undefined;
+
     set((s) => {
-      const now = new Date().toISOString().slice(0, 16).replace("T", " ");
       const updatedPoints = s.inspectionPoints.map((p) =>
         p.id === pointId
           ? {
@@ -304,6 +357,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               status: data.status,
               checkedItems: data.checkedItems,
               photoUrls: data.photoUrls,
+              photoFilenames: data.photoFilenames ?? p.photoFilenames,
               notes: data.notes,
               savedAt: now,
             }
@@ -324,19 +378,30 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       const total = pointIdsForInspection.length;
-      const doneCount = pointIdsForInspection.filter(
+      const newDoneCount = pointIdsForInspection.filter(
         (pid) => updatedPoints.find((p) => p.id === pid)?.status === "done"
       ).length;
-      const progress = total > 0 ? Math.round((doneCount / total) * 100) : 0;
-      const allDone = doneCount === total && total > 0;
+      const newProgress = total > 0 ? Math.round((newDoneCount / total) * 100) : 0;
+      const oldProgress = inspection.progress;
+      const finalProgress = Math.max(oldProgress, newProgress);
+      const allDone = finalProgress === 100;
+
+      let newStatus: Inspection["status"] = inspection.status;
+      if (finalProgress === 0) {
+        newStatus = "pending";
+      } else if (finalProgress > 0 && finalProgress < 100) {
+        newStatus = "in_progress";
+      } else if (finalProgress === 100) {
+        newStatus = "completed";
+      }
 
       const updatedInspections = s.inspections.map((i) =>
         i.id === inspectionId
           ? {
               ...i,
-              progress,
-              status: (allDone ? "completed" : "in_progress") as Inspection["status"],
-              completeDate: allDone ? now.slice(0, 10) : i.completeDate,
+              progress: finalProgress,
+              status: newStatus,
+              completeDate: allDone && !i.completeDate ? now.slice(0, 10) : i.completeDate,
             }
           : i
       );
@@ -345,7 +410,76 @@ export const useAppStore = create<AppState>((set, get) => ({
         inspectionPoints: updatedPoints,
         inspections: updatedInspections,
       };
-    }),
+    });
+
+    try {
+      const toPersist: Partial<PersistState> = {};
+      const state = get();
+      for (const key of PERSIST_FIELDS) {
+        (toPersist as any)[key] = (state as any)[key];
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(toPersist));
+    } catch (e) {
+      console.error("[store] localStorage capacity exceeded:", e);
+      success = false;
+      error = "图片过多超过浏览器存储限制，建议删除部分旧照片后重试";
+    }
+
+    return { success, error };
+  },
+
+  alignInspectionProgress: (inspectionId) => {
+    let correctedProgress = 0;
+    set((s) => {
+      const inspection = s.inspections.find((i) => i.id === inspectionId);
+      if (!inspection) return {};
+
+      let pointIdsForInspection: string[];
+      if (inspection.pointIds.length > 0) {
+        pointIdsForInspection = inspection.pointIds;
+      } else {
+        const buildingPoints = inspection.buildingIds
+          .map((bid) => s.inspectionPoints.filter((p) => p.buildingId === bid))
+          .flat();
+        pointIdsForInspection = buildingPoints.slice(0, 8).map((p) => p.id);
+      }
+
+      const total = pointIdsForInspection.length;
+      const doneCount = pointIdsForInspection.filter(
+        (pid) => s.inspectionPoints.find((p) => p.id === pid)?.status === "done"
+      ).length;
+      const correctProgress = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+
+      if (correctProgress === inspection.progress) {
+        correctedProgress = inspection.progress;
+        return {};
+      }
+
+      correctedProgress = correctProgress;
+
+      let newStatus: Inspection["status"] = inspection.status;
+      if (correctProgress === 0) {
+        newStatus = "pending";
+      } else if (correctProgress > 0 && correctProgress < 100) {
+        newStatus = "in_progress";
+      } else if (correctProgress === 100) {
+        newStatus = "completed";
+      }
+
+      const updatedInspections = s.inspections.map((i) =>
+        i.id === inspectionId
+          ? {
+              ...i,
+              progress: correctProgress,
+              status: newStatus,
+            }
+          : i
+      );
+
+      return { inspections: updatedInspections };
+    });
+    return correctedProgress;
+  },
 
   addHazard: (h) => set((s) => ({ hazards: [h, ...s.hazards] })),
   updateHazard: (id, data) => set((s) => ({ hazards: s.hazards.map((h) => (h.id === id ? { ...h, ...data } : h)) })),
@@ -637,6 +771,135 @@ export const useAppStore = create<AppState>((set, get) => ({
       ),
     })),
 
+  createMaintenanceOrder: (data) => {
+    const { currentUser, addChangeLog, devices, users } = get();
+    const device = devices.find((d) => d.id === data.deviceId);
+    const handler = users.find((u) => u.id === data.handlerId);
+    if (!device || !handler) return null;
+
+    const now = new Date();
+    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+    const newOrder: MaintenanceOrder = {
+      id: `mo${Date.now()}`,
+      deviceId: device.id,
+      deviceName: device.name,
+      deviceCode: device.code,
+      buildingId: device.buildingId,
+      buildingName: device.buildingName,
+      type: data.type,
+      sourceStatus: device.status,
+      priority: data.priority,
+      description: data.description,
+      handlerId: handler.id,
+      handlerName: handler.name,
+      handlerDept: handler.dept,
+      expectedDate: data.expectedDate,
+      createTime: timeStr,
+      status: "pending",
+      createdById: currentUser.id,
+      createdByName: currentUser.name,
+    };
+
+    set((s) => ({
+      maintenanceOrders: [newOrder, ...s.maintenanceOrders],
+      devices: s.devices.map((d) =>
+        d.id === data.deviceId
+          ? { ...d, status: "maintenance" as const, currentMaintenanceId: newOrder.id }
+          : d
+      ),
+    }));
+
+    addChangeLog({
+      module: "维修保养",
+      recordId: newOrder.id,
+      recordName: `${newOrder.id} - ${device.name}`,
+      action: "create",
+      fieldName: "维修单",
+      oldValue: "",
+      newValue: `指派给${handler.name}（${handler.dept}）`,
+      operatorName: currentUser.name,
+    });
+
+    return newOrder;
+  },
+
+  startMaintenance: (id) => {
+    const { currentUser, addChangeLog, maintenanceOrders } = get();
+    const order = maintenanceOrders.find((o) => o.id === id);
+    if (!order) return;
+
+    const now = new Date();
+    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+    set((s) => ({
+      maintenanceOrders: s.maintenanceOrders.map((o) =>
+        o.id === id ? { ...o, status: "in_progress" as const, startTime: timeStr } : o
+      ),
+    }));
+
+    addChangeLog({
+      module: "维修保养",
+      recordId: id,
+      recordName: `${id} - ${order.deviceName}`,
+      action: "update",
+      fieldName: "状态",
+      oldValue: "待处理",
+      newValue: "处理中",
+      operatorName: currentUser.name,
+    });
+  },
+
+  completeMaintenance: (id, params) => {
+    const { currentUser, addChangeLog, maintenanceOrders } = get();
+    const order = maintenanceOrders.find((o) => o.id === id);
+    if (!order) return;
+
+    const now = new Date();
+    const timeStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")} ${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+
+    set((s) => ({
+      maintenanceOrders: s.maintenanceOrders.map((o) =>
+        o.id === id
+          ? {
+              ...o,
+              status: "completed" as const,
+              completeTime: timeStr,
+              processRecord: params.processRecord,
+              cost: params.cost,
+              photoUrls: params.photoUrls || o.photoUrls,
+            }
+          : o
+      ),
+      devices: s.devices.map((d) => {
+        if (d.id !== order.deviceId) return d;
+        const history = d.maintenanceHistory ? [...d.maintenanceHistory, id] : [id];
+        return {
+          ...d,
+          status: "normal" as const,
+          currentMaintenanceId: undefined,
+          maintenanceHistory: history,
+        };
+      }),
+    }));
+
+    addChangeLog({
+      module: "维修保养",
+      recordId: id,
+      recordName: `${id} - ${order.deviceName}`,
+      action: "update",
+      fieldName: "状态",
+      oldValue: "处理中",
+      newValue: "已完成",
+      operatorName: currentUser.name,
+    });
+  },
+
+  getDeviceMaintenanceOrders: (deviceId) => {
+    const { maintenanceOrders } = get();
+    return maintenanceOrders.filter((o) => o.deviceId === deviceId);
+  },
+
   addChangeLog: (log) => {
     const { currentUser } = get();
     const newLog: ChangeLog = {
@@ -677,6 +940,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       overviewStats: mockOverviewStats,
       todos: mockTodos,
       alerts: mockAlerts,
+      maintenanceOrders: mockMaintenanceOrders,
       currentUser: mockUsers[0],
       sidebarCollapsed: false,
       selectedBuildingId: null,

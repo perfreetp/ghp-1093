@@ -2,6 +2,9 @@ export type RiskLevel = "high" | "medium" | "low" | "normal";
 
 export type BuildingType = "office" | "rnd" | "workshop" | "warehouse" | "complex" | "other";
 
+export type MaintenanceStatus = "pending" | "in_progress" | "completed";
+export type MaintenanceType = "repair" | "maintenance";
+
 export type DeviceType = "fire_extinguisher" | "sprinkler" | "fire_hydrant" | "smoke_detector" | "fire_alarm" | "emergency_light";
 
 export type DeviceStatus = "normal" | "warning" | "expired" | "maintenance";
@@ -69,6 +72,39 @@ export interface Device {
   status: DeviceStatus;
   pressureLevel?: "normal" | "low" | "high";
   remark: string;
+  currentMaintenanceId?: string;
+  maintenanceHistory?: string[];
+}
+
+export interface MaintenanceOrder {
+  id: string;
+  deviceId: string;
+  deviceName: string;
+  deviceCode: string;
+  buildingId: string;
+  buildingName: string;
+  type: MaintenanceType;
+  sourceStatus: DeviceStatus;
+  priority: "high" | "medium" | "low";
+  description: string;
+  handlerId: string;
+  handlerName: string;
+  handlerDept: string;
+  expectedDate: string;
+  createTime: string;
+  startTime?: string;
+  completeTime?: string;
+  status: MaintenanceStatus;
+  processRecord?: string;
+  cost?: number;
+  photoUrls?: string[];
+  createdById: string;
+  createdByName: string;
+}
+
+export interface PhotoItem {
+  url: string;
+  name: string;
 }
 
 export interface InspectionPoint {
@@ -83,6 +119,7 @@ export interface InspectionPoint {
   status?: InspectionPointStatus;
   checkedItems?: string[];
   photoUrls?: string[];
+  photoFilenames?: string[];
   notes?: string;
   savedAt?: string;
 }
@@ -237,7 +274,7 @@ export interface OverviewStats {
 
 export interface TodoItem {
   id: string;
-  type: "inspection" | "hazard" | "review";
+  type: "inspection" | "hazard" | "review" | "maintenance";
   title: string;
   priority: "high" | "medium" | "low";
   deadline: string;

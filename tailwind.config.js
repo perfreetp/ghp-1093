@@ -34,19 +34,34 @@ export default {
           900: "#1E3A8A",
         },
         warning: {
+          50: "#FFF7ED",
+          100: "#FFEDD5",
+          200: "#FED7AA",
+          300: "#FDBA74",
           400: "#FB923C",
           500: "#F97316",
           600: "#EA580C",
+          700: "#C2410C",
         },
         safe: {
+          50: "#ECFDF5",
+          100: "#D1FAE5",
+          200: "#A7F3D0",
+          300: "#6EE7B7",
           400: "#34D399",
           500: "#059669",
           600: "#047857",
+          700: "#065F46",
         },
         risk: {
+          50: "#FEFCE8",
+          100: "#FEF9C3",
+          200: "#FEF08A",
+          300: "#FDE047",
           400: "#FACC15",
           500: "#EAB308",
           600: "#CA8A04",
+          700: "#A16207",
         },
       },
       fontFamily: {
@@ -61,6 +76,7 @@ export default {
       animation: {
         "fade-in": "fadeIn 0.3s ease-out",
         "slide-in": "slideIn 0.18s ease-out",
+        "slide-in-right": "slideInRight 0.3s ease-out",
         "pulse-danger": "pulseDanger 1.2s ease-in-out 2",
         "stagger-in": "staggerIn 0.4s ease-out both",
         "scan-line": "scanLine 2s ease-in-out infinite",
@@ -72,6 +88,10 @@ export default {
         },
         slideIn: {
           "0%": { opacity: "0", transform: "translateX(-8px)" },
+          "100%": { opacity: "1", transform: "translateX(0)" },
+        },
+        slideInRight: {
+          "0%": { opacity: "0", transform: "translateX(100%)" },
           "100%": { opacity: "1", transform: "translateX(0)" },
         },
         pulseDanger: {
